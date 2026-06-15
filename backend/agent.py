@@ -90,7 +90,7 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
         prompt = "\n\n".join(history) + "\n\nLEO:"
 
         # Ask Gemini what to do next (with retry on 429)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash")
         for attempt in range(3):
             try:
                 response = model.generate_content(prompt)
