@@ -3,10 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 # pyrefly: ignore [missing-import]
 import google.generativeai as genai
-import subprocess
-import tempfile
 import os
 from dotenv import load_dotenv
+from tools import TOOLS, TOOL_DESCRIPTIONS
 
 load_dotenv()
 
@@ -28,7 +27,11 @@ class ChatRequest(BaseModel):
 
 class ExecuteRequest(BaseModel):
     code: str
-    language: str = "python"  # default to python
+    language: str = "python"
+
+class ToolRequest(BaseModel):
+    tool: str
+    params: dict = {}
 
 @app.get("/")
 def root():
@@ -37,6 +40,22 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/tools")
+def get_tools():
+    return {"tools": TOOL_DESCRIPTIONS}
+
+@app.post("/tools/run")
+def run_tool(req: ToolRequest):
+    if req.tool not in TOOLS:
+        raise HTTPException(status_code=404, detail=f"Tool '{req.tool}' not found")
+    try:
+        result = TOOLS[req.tool](**req.params)
+        return result
+    except TypeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat")
 def chat(req: ChatRequest):
@@ -48,40 +67,8 @@ def chat(req: ChatRequest):
 
 @app.post("/execute")
 def execute(req: ExecuteRequest):
-    try:
-        # Write code to a temp file
-        suffix = ".py" if req.language == "python" else ".js"
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=suffix, delete=False
-        ) as f:
-            f.write(req.code)
-            tmp_path = f.name
-
-        # Run inside Docker sandbox
-        filename = os.path.basename(tmp_path)
-        if req.language == "python":
-            cmd = f"docker run --rm -v {tmp_path}:/workspace/{filename} leo-sandbox python3 /workspace/{filename}"
-        else:
-            cmd = f"docker run --rm -v {tmp_path}:/workspace/{filename} leo-sandbox node /workspace/{filename}"
-
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30  # kill if takes longer than 30s
-        )
-
-        os.unlink(tmp_path)  # cleanup temp file
-
-        return {
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode,
-            "success": result.returncode == 0
-        }
-
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=408, detail="Code execution timed out")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    from tools.shell_tools import run_python, run_shell
+    if req.language == "python":
+        return run_python(req.code)
+    else:
+        return run_shell(req.code)
