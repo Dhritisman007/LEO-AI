@@ -6,11 +6,12 @@ import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 from tools import TOOLS, TOOL_DESCRIPTIONS
+from agent import run_agent
 
 load_dotenv()
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-2.5-flash")
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 app = FastAPI(title="LEO Agent API")
 
@@ -32,6 +33,10 @@ class ExecuteRequest(BaseModel):
 class ToolRequest(BaseModel):
     tool: str
     params: dict = {}
+
+class AgentRequest(BaseModel):
+    task: str
+    max_steps: int = 10
 
 @app.get("/")
 def root():
@@ -72,3 +77,11 @@ def execute(req: ExecuteRequest):
         return run_python(req.code)
     else:
         return run_shell(req.code)
+
+@app.post("/agent")
+def agent(req: AgentRequest):
+    try:
+        result = run_agent(req.task, req.max_steps)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -1,109 +1,128 @@
 "use client";
 import { useState } from "react";
 
-export default function Home() {
-  const [message, setMessage] = useState("");
-  const [reply, setReply] = useState("");
-  const [code, setCode] = useState("");
-  const [output, setOutput] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [running, setRunning] = useState(false);
+type Step = {
+  step: number;
+  type: "tool_call" | "thought" | "done" | "error";
+  tool?: string;
+  params?: any;
+  result?: any;
+  content?: string;
+  thought?: string;
+};
 
-  async function sendMessage() {
-    if (!message.trim()) return;
+export default function Home() {
+  const [task, setTask] = useState("");
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [finalAnswer, setFinalAnswer] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function runAgent() {
+    if (!task.trim()) return;
     setLoading(true);
-    setReply("");
+    setSteps([]);
+    setFinalAnswer("");
+
     try {
-      const res = await fetch("http://127.0.0.1:8000/chat", {
+      const res = await fetch("http://127.0.0.1:8000/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ task, max_steps: 10 }),
       });
       const data = await res.json();
-      setReply(data.reply);
+      setSteps(data.steps || []);
+      setFinalAnswer(data.final_answer || "");
     } catch {
-      setReply("Error connecting to LEO backend.");
+      setFinalAnswer("Error connecting to LEO.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function runCode() {
-    if (!code.trim()) return;
-    setRunning(true);
-    setOutput(null);
-    try {
-      const res = await fetch("http://127.0.0.1:8000/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, language: "python" }),
-      });
-      const data = await res.json();
-      setOutput(data);
-    } catch {
-      setOutput({ stderr: "Error connecting to sandbox.", success: false });
-    } finally {
-      setRunning(false);
-    }
+  function stepColor(type: string) {
+    if (type === "tool_call") return "border-blue-600 bg-blue-950";
+    if (type === "done") return "border-emerald-600 bg-emerald-950";
+    if (type === "error") return "border-red-600 bg-red-950";
+    return "border-zinc-600 bg-zinc-800";
+  }
+
+  function stepIcon(type: string) {
+    if (type === "tool_call") return "🔧";
+    if (type === "done") return "✅";
+    if (type === "error") return "❌";
+    return "💭";
   }
 
   return (
     <main className="flex min-h-screen flex-col items-center bg-zinc-950 text-white px-4 py-12">
       <div className="w-full max-w-2xl">
         <h1 className="text-5xl font-bold tracking-tight text-center mb-2">LEO 🐐</h1>
-        <p className="text-zinc-400 text-center mb-10">Your AI coding agent</p>
+        <p className="text-zinc-400 text-center mb-10">Autonomous AI coding agent</p>
 
-        {/* Chat */}
-        <div className="mb-10">
-          <p className="text-zinc-500 text-sm mb-2 uppercase tracking-widest">Chat</p>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
-              placeholder="Ask LEO anything..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            />
-            <button
-              onClick={sendMessage}
-              disabled={loading}
-              className="bg-white text-black font-semibold px-5 py-3 rounded-lg hover:bg-zinc-200 disabled:opacity-50 transition"
-            >
-              {loading ? "..." : "Send"}
-            </button>
-          </div>
-          {reply && (
-            <div className="mt-4 bg-zinc-800 border border-zinc-700 rounded-lg p-4 text-zinc-200 leading-relaxed whitespace-pre-wrap">
-              {reply}
-            </div>
-          )}
-        </div>
-
-        {/* Code Runner */}
-        <div>
-          <p className="text-zinc-500 text-sm mb-2 uppercase tracking-widest">Run Code in Sandbox</p>
+        {/* Task input */}
+        <div className="mb-8">
+          <p className="text-zinc-500 text-sm mb-2 uppercase tracking-widest">Give LEO a task</p>
           <textarea
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 font-mono text-sm h-40 resize-none"
-            placeholder={"# Write Python here...\nprint('Hello from LEO sandbox 🐐')"}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 text-sm h-28 resize-none"
+            placeholder="Write a Python script that sorts a list of numbers and run it..."
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
           />
           <button
-            onClick={runCode}
-            disabled={running}
-            className="mt-2 bg-emerald-500 text-black font-semibold px-5 py-3 rounded-lg hover:bg-emerald-400 disabled:opacity-50 transition"
+            onClick={runAgent}
+            disabled={loading}
+            className="mt-2 w-full bg-white text-black font-bold py-3 rounded-lg hover:bg-zinc-200 disabled:opacity-50 transition text-sm"
           >
-            {running ? "Running..." : "▶ Run"}
+            {loading ? "LEO is working... 🐐" : "▶ Run Agent"}
           </button>
-
-          {output && (
-            <div className={`mt-4 rounded-lg p-4 font-mono text-sm border ${output.success ? "bg-zinc-800 border-zinc-700 text-emerald-400" : "bg-red-950 border-red-800 text-red-300"}`}>
-              {output.stdout && <pre>{output.stdout}</pre>}
-              {output.stderr && <pre className="text-red-400">{output.stderr}</pre>}
-              <p className="text-xs mt-2 opacity-50">exit code: {output.exit_code}</p>
-            </div>
-          )}
         </div>
+
+        {/* Steps */}
+        {steps.length > 0 && (
+          <div className="mb-8">
+            <p className="text-zinc-500 text-sm mb-3 uppercase tracking-widest">Agent steps</p>
+            <div className="flex flex-col gap-3">
+              {steps.map((s) => (
+                <div
+                  key={s.step}
+                  className={`border rounded-lg p-4 text-sm ${stepColor(s.type)}`}
+                >
+                  <div className="flex items-center gap-2 mb-1 font-semibold">
+                    <span>{stepIcon(s.type)}</span>
+                    <span>Step {s.step} — {s.type === "tool_call" ? `Tool: ${s.tool}` : s.type}</span>
+                  </div>
+
+                  {s.type === "tool_call" && (
+                    <>
+                      {s.params && (
+                        <pre className="text-xs text-zinc-400 mt-1 overflow-x-auto">
+                          params: {JSON.stringify(s.params, null, 2)}
+                        </pre>
+                      )}
+                      {s.result && (
+                        <pre className="text-xs text-zinc-300 mt-2 overflow-x-auto">
+                          result: {JSON.stringify(s.result, null, 2)}
+                        </pre>
+                      )}
+                    </>
+                  )}
+
+                  {(s.type === "thought" || s.type === "done" || s.type === "error") && (
+                    <p className="text-zinc-300 mt-1 whitespace-pre-wrap">{s.content}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Final answer */}
+        {finalAnswer && (
+          <div className="bg-emerald-950 border border-emerald-700 rounded-lg p-4">
+            <p className="text-emerald-400 font-semibold mb-1">✅ LEO's final answer</p>
+            <p className="text-zinc-200 text-sm whitespace-pre-wrap">{finalAnswer}</p>
+          </div>
+        )}
       </div>
     </main>
   );
