@@ -16,25 +16,46 @@ export default function Home() {
   const [steps, setSteps] = useState<Step[]>([]);
   const [finalAnswer, setFinalAnswer] = useState("");
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
   async function runAgent() {
     if (!task.trim()) return;
     setLoading(true);
     setSteps([]);
     setFinalAnswer("");
+    setErrorMsg("");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 300000); // 5 min timeout
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/agent", {
+      const res = await fetch("http://127.0.0.1:8001/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task, max_steps: 10 }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        const detail = errData?.detail || `Server error (${res.status})`;
+        setErrorMsg(detail);
+        return;
+      }
+
       const data = await res.json();
       setSteps(data.steps || []);
       setFinalAnswer(data.final_answer || "");
-    } catch {
-      setFinalAnswer("Error connecting to LEO.");
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        setErrorMsg("Request timed out after 5 minutes. The backend may be rate-limited or stuck.");
+      } else {
+        setErrorMsg("Error connecting to LEO backend. Is the server running on port 8000?");
+      }
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
     }
   }
@@ -67,6 +88,12 @@ export default function Home() {
             placeholder="Write a Python script that sorts a list of numbers and run it..."
             value={task}
             onChange={(e) => setTask(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !loading) {
+                e.preventDefault();
+                runAgent();
+              }
+            }}
           />
           <button
             onClick={runAgent}
@@ -76,6 +103,14 @@ export default function Home() {
             {loading ? "LEO is working... 🐐" : "▶ Run Agent"}
           </button>
         </div>
+
+        {/* Error message */}
+        {errorMsg && (
+          <div className="mb-8 bg-red-950 border border-red-700 rounded-lg p-4">
+            <p className="text-red-400 font-semibold mb-1">❌ Error</p>
+            <p className="text-zinc-200 text-sm whitespace-pre-wrap">{errorMsg}</p>
+          </div>
+        )}
 
         {/* Steps */}
         {steps.length > 0 && (
@@ -94,6 +129,11 @@ export default function Home() {
 
                   {s.type === "tool_call" && (
                     <>
+                      {s.thought && (
+                        <p className="text-zinc-400 text-xs mt-1 mb-2 whitespace-pre-wrap">
+                          {s.thought.split("TOOL:")[0].trim()}
+                        </p>
+                      )}
                       {s.params && (
                         <pre className="text-xs text-zinc-400 mt-1 overflow-x-auto">
                           params: {JSON.stringify(s.params, null, 2)}
@@ -119,7 +159,7 @@ export default function Home() {
         {/* Final answer */}
         {finalAnswer && (
           <div className="bg-emerald-950 border border-emerald-700 rounded-lg p-4">
-            <p className="text-emerald-400 font-semibold mb-1">✅ LEO's final answer</p>
+            <p className="text-emerald-400 font-semibold mb-1">✅ LEO&apos;s final answer</p>
             <p className="text-zinc-200 text-sm whitespace-pre-wrap">{finalAnswer}</p>
           </div>
         )}

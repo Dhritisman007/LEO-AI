@@ -1,9 +1,15 @@
 import json
 import re
 import time
+import os
 # pyrefly: ignore [missing-import]
 import google.generativeai as genai
+from dotenv import load_dotenv
 from tools import TOOLS, TOOL_DESCRIPTIONS
+
+# Ensure API key is configured even when imported standalone
+load_dotenv()
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 # System prompt — tells LEO how to think and act
 SYSTEM_PROMPT = """You are LEO, an autonomous AI coding agent. 🐐
@@ -11,24 +17,48 @@ SYSTEM_PROMPT = """You are LEO, an autonomous AI coding agent. 🐐
 You have access to the following tools:
 {tool_descriptions}
 
-To use a tool, respond with this exact format:
+To use a tool, you MUST respond with EXACTLY this format (no extra text after PARAMS):
 TOOL: tool_name
 PARAMS: {{"param1": "value1", "param2": "value2"}}
 
 Rules:
 1. Think step by step before acting
-2. Use one tool at a time
+2. Use one tool at a time — include only ONE TOOL: block per response
 3. After seeing a tool result, decide your next action
-4. When the task is fully complete, start your response with DONE:
-5. If you cannot complete the task, start with ERROR: and explain why
-6. Always write clean, working code
-7. Never make up tool results — always actually use the tools
+4. When the task is fully complete, you MUST respond with DONE: followed by your final answer
+5. If you are just answering a question, greeting, or chatting, respond with DONE: followed by your reply
+6. If you cannot complete the task, respond with ERROR: followed by the reason
+7. Always write clean, working code
+8. Never make up tool results — always actually use the tools
+9. When writing Python code with newlines, use actual newlines in the JSON string, escaped as \\n
+10. After running code, always report the output in your DONE: response
 
-Example:
-User: Write a Python script that prints numbers 1 to 10 and run it
-You: I'll write the script first.
+Example multi-step task:
+User: Write a Python script that prints numbers 1 to 5 and run it
+
+LEO: I'll write the script first.
 TOOL: write_file
-PARAMS: {{"filename": "count.py", "content": "for i in range(1, 11):\\n    print(i)"}}
+PARAMS: {{"filename": "count.py", "content": "for i in range(1, 6):\\n    print(i)"}}
+
+(after seeing tool result)
+
+LEO: File written. Now I'll run it.
+TOOL: run_shell
+PARAMS: {{"command": "python3 /workspace/count.py"}}
+
+(after seeing tool result)
+
+LEO: DONE: I wrote count.py and ran it. The output was:
+1
+2
+3
+4
+5
+
+Example simple greeting:
+User: hey
+
+LEO: DONE: Hey there! 👋 I'm LEO, your AI coding agent. Give me a coding task and I'll handle it end-to-end — writing code, running it, and showing you the results! 🐐
 """
 
 def format_tool_descriptions() -> str:
@@ -41,11 +71,47 @@ def format_tool_descriptions() -> str:
     return "\n".join(lines)
 
 
+def extract_json_object(text: str, start_pos: int) -> str | None:
+    """Extract a JSON object from text starting at start_pos using brace counting."""
+    if start_pos >= len(text) or text[start_pos] != '{':
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i in range(start_pos, len(text)):
+        char = text[i]
+
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == '\\' and in_string:
+            escape_next = True
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if char == '{':
+            depth += 1
+        elif char == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start_pos:i + 1]
+
+    return None
+
+
 def parse_tool_call(text: str):
     """Extract tool name and params from LLM response."""
     try:
         tool_match = re.search(r"TOOL:\s*(\w+)", text)
-        params_match = re.search(r"PARAMS:\s*(\{.*?\})", text, re.DOTALL)
 
         if not tool_match:
             return None, None
@@ -53,13 +119,39 @@ def parse_tool_call(text: str):
         tool_name = tool_match.group(1).strip()
         params = {}
 
-        if params_match:
-            params_str = params_match.group(1).strip()
-            params = json.loads(params_str)
+        # Find PARAMS: and extract JSON using brace counting
+        params_prefix = re.search(r"PARAMS:\s*", text)
+        if params_prefix:
+            json_start = params_prefix.end()
+            # Find the opening brace
+            while json_start < len(text) and text[json_start] != '{':
+                json_start += 1
+            if json_start < len(text):
+                json_str = extract_json_object(text, json_start)
+                if json_str:
+                    params = json.loads(json_str)
 
         return tool_name, params
-    except Exception:
+    except Exception as e:
+        print(f"Error parsing tool call: {e}")
         return None, None
+
+
+def check_completion(text: str):
+    """Check if LEO's response indicates completion or error.
+    Returns (type, content) or (None, None) if not a completion.
+    """
+    # Check for DONE: anywhere in the response
+    done_match = re.search(r"DONE:\s*(.*)", text, re.DOTALL)
+    if done_match:
+        return "done", done_match.group(1).strip()
+
+    # Check for ERROR: anywhere in the response
+    error_match = re.search(r"ERROR:\s*(.*)", text, re.DOTALL)
+    if error_match:
+        return "error", error_match.group(1).strip()
+
+    return None, None
 
 
 def run_agent(task: str, max_steps: int = 10) -> dict:
@@ -80,17 +172,17 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
     steps = []
     final_answer = None
 
+    model = genai.GenerativeModel("gemini-flash-lite-latest")
+
     for step in range(max_steps):
-        # Rate limit: wait between API calls to stay under 5 req/min
+        # Small delay between steps to be polite to the API
         if step > 0:
-            print("Waiting 15s for rate limit...")
-            time.sleep(15)
+            time.sleep(2)
 
         # Build prompt from history
         prompt = "\n\n".join(history) + "\n\nLEO:"
 
         # Ask Gemini what to do next (with retry on 429)
-        model = genai.GenerativeModel("gemini-1.5-flash")
         for attempt in range(3):
             try:
                 response = model.generate_content(prompt)
@@ -98,35 +190,42 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
                 break
             except Exception as e:
                 if "429" in str(e) and attempt < 2:
-                    wait = 30 * (attempt + 1)
+                    wait = 15 * (attempt + 1)
                     print(f"Rate limited, retrying in {wait}s...")
                     time.sleep(wait)
                 else:
-                    raise
+                    # Return error instead of crashing
+                    return {
+                        "task": task,
+                        "steps": steps,
+                        "final_answer": f"ERROR: API call failed — {str(e)}",
+                        "total_steps": len(steps)
+                    }
 
         print(f"\n--- Step {step + 1} ---")
-        print(f"LEO: {leo_response}")
+        print(f"LEO: {leo_response[:200]}...")
 
         # Add LEO's response to history
         history.append(f"LEO: {leo_response}")
 
-        # Check if task is done
-        if leo_response.startswith("DONE:"):
-            final_answer = leo_response.replace("DONE:", "").strip()
+        # Check if task is done or errored (search anywhere in response)
+        completion_type, completion_content = check_completion(leo_response)
+
+        if completion_type == "done":
+            final_answer = completion_content
             steps.append({
                 "step": step + 1,
                 "type": "done",
-                "content": leo_response
+                "content": completion_content
             })
             break
 
-        # Check if error
-        if leo_response.startswith("ERROR:"):
-            final_answer = leo_response
+        if completion_type == "error":
+            final_answer = completion_content
             steps.append({
                 "step": step + 1,
                 "type": "error",
-                "content": leo_response
+                "content": completion_content
             })
             break
 
@@ -145,11 +244,14 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
             # Execute the tool
             if tool_name in TOOLS:
                 print(f"Running tool: {tool_name} with {params}")
-                tool_result = TOOLS[tool_name](**params)
+                try:
+                    tool_result = TOOLS[tool_name](**params)
+                except Exception as e:
+                    tool_result = {"success": False, "error": f"Tool execution failed: {str(e)}"}
             else:
-                tool_result = {"success": False, "error": f"Tool '{tool_name}' not found"}
+                tool_result = {"success": False, "error": f"Tool '{tool_name}' not found. Available tools: {list(TOOLS.keys())}"}
 
-            print(f"Tool result: {tool_result}")
+            print(f"Tool result: {str(tool_result)[:200]}...")
 
             # Add tool result to history so LEO can see it
             history.append(f"TOOL RESULT: {json.dumps(tool_result)}")
