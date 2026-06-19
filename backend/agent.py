@@ -32,6 +32,7 @@ Rules:
 8. Never make up tool results — always actually use the tools
 9. When writing Python code with newlines, use actual newlines in the JSON string, escaped as \\n
 10. After running code, always report the output in your DONE: response
+11. Do not explain what you "will do" in plain text without taking an action. Either call a tool or finish with DONE/ERROR.
 
 Example multi-step task:
 User: Write a Python script that prints numbers 1 to 5 and run it
@@ -70,6 +71,13 @@ def format_tool_descriptions() -> str:
         lines.append(f"- {tool['name']}: {tool['description']} | params: {params or 'none'}")
     return "\n".join(lines)
 
+
+LOG_FILE = "/tmp/leo_agent.log"
+
+def log(message: str):
+    with open(LOG_FILE, "a") as f:
+        f.write(message + "\n")
+    print(message)
 
 def extract_json_object(text: str, start_pos: int) -> str | None:
     """Extract a JSON object from text starting at start_pos using brace counting."""
@@ -129,11 +137,12 @@ def parse_tool_call(text: str):
             if json_start < len(text):
                 json_str = extract_json_object(text, json_start)
                 if json_str:
+                    json_str = json_str.replace("```json", "").replace("```", "").strip()
                     params = json.loads(json_str)
 
         return tool_name, params
     except Exception as e:
-        print(f"Error parsing tool call: {e}")
+        log(f"PARSE ERROR: {e}")
         return None, None
 
 
@@ -155,10 +164,8 @@ def check_completion(text: str):
 
 
 def run_agent(task: str, max_steps: int = 10) -> dict:
-    """
-    Main agent loop.
-    Runs until task is done or max_steps reached.
-    """
+    log(f"\n{'='*50}\nNEW TASK: {task}\n{'='*50}")
+
     system = SYSTEM_PROMPT.format(
         tool_descriptions=format_tool_descriptions()
     )
@@ -172,7 +179,14 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
     steps = []
     final_answer = None
 
-    model = genai.GenerativeModel("gemini-flash-lite-latest")
+    model = genai.GenerativeModel(
+        "gemini-flash-lite-latest",
+        generation_config={"temperature": 0.3}
+    )
+
+    # Track repeated tool calls to detect loops
+    last_tool_signature = None
+    repeat_count = 0
 
     for step in range(max_steps):
         # Small delay between steps to be polite to the API
@@ -191,9 +205,10 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
             except Exception as e:
                 if "429" in str(e) and attempt < 2:
                     wait = 15 * (attempt + 1)
-                    print(f"Rate limited, retrying in {wait}s...")
+                    log(f"Rate limited, retrying in {wait}s...")
                     time.sleep(wait)
                 else:
+                    log(f"GEMINI API ERROR: {e}")
                     # Return error instead of crashing
                     return {
                         "task": task,
@@ -202,8 +217,7 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
                         "total_steps": len(steps)
                     }
 
-        print(f"\n--- Step {step + 1} ---")
-        print(f"LEO: {leo_response[:200]}...")
+        log(f"\n--- Step {step + 1} ---\nLEO: {leo_response[:200]}...")
 
         # Add LEO's response to history
         history.append(f"LEO: {leo_response}")
@@ -233,6 +247,24 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
         tool_name, params = parse_tool_call(leo_response)
 
         if tool_name:
+            # Loop detection — same tool + same params called twice in a row
+            try:
+                signature = f"{tool_name}:{json.dumps(params, sort_keys=True)}"
+            except Exception:
+                signature = f"{tool_name}:error_serializing_params"
+                
+            if signature == last_tool_signature:
+                repeat_count += 1
+            else:
+                repeat_count = 0
+            last_tool_signature = signature
+
+            if repeat_count >= 2:
+                log("LOOP DETECTED — same tool call repeated 3x, stopping")
+                final_answer = "ERROR: LEO got stuck repeating the same action. Task stopped to prevent infinite loop."
+                steps.append({"step": step + 1, "type": "error", "content": final_answer})
+                break
+
             steps.append({
                 "step": step + 1,
                 "type": "tool_call",
@@ -243,31 +275,40 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
 
             # Execute the tool
             if tool_name in TOOLS:
-                print(f"Running tool: {tool_name} with {params}")
+                log(f"Running tool: {tool_name} with {params}")
                 try:
                     tool_result = TOOLS[tool_name](**params)
+                except TypeError as e:
+                    tool_result = {"success": False, "error": f"Bad parameters: {str(e)}"}
                 except Exception as e:
                     tool_result = {"success": False, "error": f"Tool execution failed: {str(e)}"}
             else:
                 tool_result = {"success": False, "error": f"Tool '{tool_name}' not found. Available tools: {list(TOOLS.keys())}"}
 
-            print(f"Tool result: {str(tool_result)[:200]}...")
+            log(f"Tool result: {str(tool_result)[:200]}...")
 
             # Add tool result to history so LEO can see it
             history.append(f"TOOL RESULT: {json.dumps(tool_result)}")
 
             steps[-1]["result"] = tool_result
         else:
-            # LEO responded with text but no tool call — treat as thinking step
+            # No tool call found — nudge LEO instead of silently continuing
             steps.append({
                 "step": step + 1,
                 "type": "thought",
                 "content": leo_response
             })
+            history.append(
+                "SYSTEM REMINDER: You must either call a tool using the TOOL:/PARAMS: format, "
+                "or finish with DONE: or ERROR:. Please continue."
+            )
 
     # If max steps reached with no answer
     if not final_answer:
         final_answer = "Task incomplete — max steps reached."
+        steps.append({"step": max_steps + 1, "type": "error", "content": final_answer})
+
+    log(f"\nFINAL ANSWER: {final_answer}")
 
     return {
         "task": task,
