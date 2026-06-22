@@ -7,6 +7,7 @@ import os
 from dotenv import load_dotenv
 from tools import TOOLS, TOOL_DESCRIPTIONS
 from agent import run_agent
+from tools.file_tools import get_file_tree, get_file_content
 
 load_dotenv()
 
@@ -85,3 +86,14 @@ def agent(req: AgentRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/workspace/tree")
+def workspace_tree():
+    return get_file_tree()
+
+@app.get("/workspace/file/{filename:path}")
+def workspace_file(filename: str):
+    result = get_file_content(filename)
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("error"))
+    return result

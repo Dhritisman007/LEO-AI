@@ -1,4 +1,4 @@
-from .file_tools import read_file, write_file, list_files
+from .file_tools import read_file, write_file, list_files, get_file_tree, get_file_content
 from .shell_tools import run_python, run_shell
 from .search_tools import web_search
 
