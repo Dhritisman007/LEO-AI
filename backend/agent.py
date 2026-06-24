@@ -163,96 +163,101 @@ def check_completion(text: str):
     return None, None
 
 
-def run_agent(task: str, max_steps: int = 10) -> dict:
-    log(f"\n{'='*50}\nNEW TASK: {task}\n{'='*50}")
+def generate_plan(task: str) -> list:
+    """Ask Gemini to break the task into a numbered plan before acting."""
+    planning_prompt = f"""You are LEO, an AI coding agent. Before doing anything, break this task into a short numbered plan.
 
-    system = SYSTEM_PROMPT.format(
-        tool_descriptions=format_tool_descriptions()
-    )
+Task: {task}
 
-    # Conversation history
-    history = [
-        f"SYSTEM: {system}",
-        f"USER TASK: {task}"
-    ]
+Respond ONLY with a numbered list of 2-6 concrete steps. No explanation, no extra text.
+Example format:
+1. Write the script
+2. Run the script
+3. Verify output
 
-    steps = []
-    final_answer = None
+Now write the plan for the task above:"""
 
     model = genai.GenerativeModel(
         "gemini-flash-lite-latest",
         generation_config={"temperature": 0.3}
     )
+    response = model.generate_content(planning_prompt)
+    raw = response.text.strip()
 
-    # Track repeated tool calls to detect loops
+    # Extract numbered lines like "1. Write the script"
+    lines = re.findall(r"^\s*\d+[\.\)]\s*(.+)$", raw, re.MULTILINE)
+
+    if not lines:
+        # fallback — just split by newline if numbering parsing failed
+        lines = [l.strip("- ").strip() for l in raw.split("\n") if l.strip()]
+
+    plan = [
+        {"id": i + 1, "description": desc.strip(), "status": "pending"}
+        for i, desc in enumerate(lines)
+    ]
+    return plan
+
+def run_agent(task: str, max_steps: int = 10) -> dict:
+    log(f"\n{'='*50}\nNEW TASK: {task}\n{'='*50}")
+
+    # --- NEW: generate plan first ---
+    plan = generate_plan(task)
+    log(f"PLAN: {json.dumps(plan, indent=2)}")
+
+    system = SYSTEM_PROMPT.format(tool_descriptions=format_tool_descriptions())
+    plan_text = "\n".join(f"{p['id']}. {p['description']}" for p in plan)
+    history = [
+        f"SYSTEM: {system}",
+        f"USER TASK: {task}",
+        f"YOUR PLAN:\n{plan_text}\n(Follow this plan, but adapt if needed. Execute it one step at a time using tools.)"
+    ]
+    steps = []
+    final_answer = None
+    model = genai.GenerativeModel("gemini-flash-lite-latest", generation_config={"temperature": 0.3})
+
     last_tool_signature = None
     repeat_count = 0
+    current_plan_idx = 0  # which plan step we think we're on
+
+    # Mark first plan step as in_progress
+    if plan:
+        plan[0]["status"] = "in_progress"
 
     for step in range(max_steps):
-        # Small delay between steps to be polite to the API
-        if step > 0:
-            time.sleep(2)
-
-        # Build prompt from history
         prompt = "\n\n".join(history) + "\n\nLEO:"
 
-        # Ask Gemini what to do next (with retry on 429)
-        for attempt in range(3):
-            try:
-                response = model.generate_content(prompt)
-                leo_response = response.text.strip()
-                break
-            except Exception as e:
-                if "429" in str(e) and attempt < 2:
-                    wait = 15 * (attempt + 1)
-                    log(f"Rate limited, retrying in {wait}s...")
-                    time.sleep(wait)
-                else:
-                    log(f"GEMINI API ERROR: {e}")
-                    # Return error instead of crashing
-                    return {
-                        "task": task,
-                        "steps": steps,
-                        "final_answer": f"ERROR: API call failed — {str(e)}",
-                        "total_steps": len(steps)
-                    }
+        try:
+            response = model.generate_content(prompt)
+            leo_response = response.text.strip()
+        except Exception as e:
+            log(f"GEMINI API ERROR: {e}")
+            steps.append({"step": step + 1, "type": "error", "content": f"API error: {str(e)}"})
+            final_answer = f"ERROR: Gemini API call failed — {str(e)}"
+            break
 
-        log(f"\n--- Step {step + 1} ---\nLEO: {leo_response[:200]}...")
-
-        # Add LEO's response to history
+        log(f"\n--- Step {step + 1} ---\nLEO: {leo_response}")
         history.append(f"LEO: {leo_response}")
 
-        # Check if task is done or errored (search anywhere in response)
-        completion_type, completion_content = check_completion(leo_response)
-
-        if completion_type == "done":
-            final_answer = completion_content
-            steps.append({
-                "step": step + 1,
-                "type": "done",
-                "content": completion_content
-            })
+        if leo_response.startswith("DONE:"):
+            final_answer = leo_response.replace("DONE:", "").strip()
+            steps.append({"step": step + 1, "type": "done", "content": leo_response})
+            # mark all remaining plan steps done
+            for p in plan:
+                if p["status"] != "failed":
+                    p["status"] = "done"
             break
 
-        if completion_type == "error":
-            final_answer = completion_content
-            steps.append({
-                "step": step + 1,
-                "type": "error",
-                "content": completion_content
-            })
+        if leo_response.startswith("ERROR:"):
+            final_answer = leo_response
+            steps.append({"step": step + 1, "type": "error", "content": leo_response})
+            if plan and current_plan_idx < len(plan):
+                plan[current_plan_idx]["status"] = "failed"
             break
 
-        # Check if LEO wants to use a tool
         tool_name, params = parse_tool_call(leo_response)
 
         if tool_name:
-            # Loop detection — same tool + same params called twice in a row
-            try:
-                signature = f"{tool_name}:{json.dumps(params, sort_keys=True)}"
-            except Exception:
-                signature = f"{tool_name}:error_serializing_params"
-                
+            signature = f"{tool_name}:{json.dumps(params, sort_keys=True)}"
             if signature == last_tool_signature:
                 repeat_count += 1
             else:
@@ -260,9 +265,11 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
             last_tool_signature = signature
 
             if repeat_count >= 2:
-                log("LOOP DETECTED — same tool call repeated 3x, stopping")
-                final_answer = "ERROR: LEO got stuck repeating the same action. Task stopped to prevent infinite loop."
+                log("LOOP DETECTED — stopping")
+                final_answer = "ERROR: LEO got stuck repeating the same action. Task stopped."
                 steps.append({"step": step + 1, "type": "error", "content": final_answer})
+                if plan and current_plan_idx < len(plan):
+                    plan[current_plan_idx]["status"] = "failed"
                 break
 
             steps.append({
@@ -270,48 +277,53 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
                 "type": "tool_call",
                 "tool": tool_name,
                 "params": params,
-                "thought": leo_response
+                "thought": leo_response,
+                "plan_idx": current_plan_idx  # NEW: tag which plan step this belongs to
             })
 
-            # Execute the tool
             if tool_name in TOOLS:
-                log(f"Running tool: {tool_name} with {params}")
                 try:
+                    log(f"Running tool: {tool_name} with {params}")
                     tool_result = TOOLS[tool_name](**params)
                 except TypeError as e:
                     tool_result = {"success": False, "error": f"Bad parameters: {str(e)}"}
                 except Exception as e:
-                    tool_result = {"success": False, "error": f"Tool execution failed: {str(e)}"}
+                    tool_result = {"success": False, "error": str(e)}
             else:
-                tool_result = {"success": False, "error": f"Tool '{tool_name}' not found. Available tools: {list(TOOLS.keys())}"}
+                tool_result = {"success": False, "error": f"Tool '{tool_name}' not found"}
 
-            log(f"Tool result: {str(tool_result)[:200]}...")
-
-            # Add tool result to history so LEO can see it
+            log(f"Tool result: {tool_result}")
             history.append(f"TOOL RESULT: {json.dumps(tool_result)}")
-
             steps[-1]["result"] = tool_result
+
+            # --- NEW: advance plan progress heuristically ---
+            # Mark current plan step done after a successful tool call,
+            # and move to the next pending plan step.
+            if plan and current_plan_idx < len(plan):
+                if tool_result.get("success"):
+                    plan[current_plan_idx]["status"] = "done"
+                    if current_plan_idx + 1 < len(plan):
+                        current_plan_idx += 1
+                        plan[current_plan_idx]["status"] = "in_progress"
+                else:
+                    plan[current_plan_idx]["status"] = "failed"
         else:
-            # No tool call found — nudge LEO instead of silently continuing
-            steps.append({
-                "step": step + 1,
-                "type": "thought",
-                "content": leo_response
-            })
+            steps.append({"step": step + 1, "type": "thought", "content": leo_response})
             history.append(
                 "SYSTEM REMINDER: You must either call a tool using the TOOL:/PARAMS: format, "
                 "or finish with DONE: or ERROR:. Please continue."
             )
 
-    # If max steps reached with no answer
     if not final_answer:
-        final_answer = "Task incomplete — max steps reached."
+        final_answer = "Task incomplete — max steps reached without finishing."
         steps.append({"step": max_steps + 1, "type": "error", "content": final_answer})
 
     log(f"\nFINAL ANSWER: {final_answer}")
+    log(f"FINAL PLAN STATE: {json.dumps(plan, indent=2)}")
 
     return {
         "task": task,
+        "plan": plan,           # NEW
         "steps": steps,
         "final_answer": final_answer,
         "total_steps": len(steps)

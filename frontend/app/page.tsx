@@ -54,6 +54,7 @@ export default function Home() {
                 ...m,
                 content: data.final_answer || "No response.",
                 steps: data.steps || [],
+                plan: data.plan || [],
                 status: data.final_answer?.startsWith("ERROR") ? "error" : "done",
               }
             : m

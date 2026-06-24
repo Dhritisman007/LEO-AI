@@ -1,6 +1,7 @@
 "use client";
 import { Wrench, CheckCircle2, XCircle, Brain, Loader2 } from "lucide-react";
 import { Message } from "../types";
+import PlanTracker from "./PlanTracker";
 
 function stepIcon(type: string) {
   if (type === "tool_call") return <Wrench size={14} />;
@@ -37,6 +38,9 @@ export default function ChatMessage({ message }: { message: Message }) {
             <Loader2 size={12} className="animate-spin text-zinc-500" />
           )}
         </div>
+
+        {/* NEW: Plan tracker */}
+        {message.plan && <PlanTracker plan={message.plan} />}
 
         {/* Agent steps trace */}
         {message.steps && message.steps.length > 0 && (

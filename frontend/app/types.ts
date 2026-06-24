@@ -1,3 +1,9 @@
+export type PlanStep = {
+  id: number;
+  description: string;
+  status: "pending" | "in_progress" | "done" | "failed";
+};
+
 export type AgentStep = {
   step: number;
   type: "tool_call" | "thought" | "done" | "error";
@@ -13,6 +19,7 @@ export type Message = {
   role: "user" | "leo";
   content: string;
   steps?: AgentStep[];
+  plan?: PlanStep[];
   status: "pending" | "done" | "error";
   timestamp: number;
 };
