@@ -40,7 +40,7 @@ export default function Home() {
     setSending(true);
 
     try {
-      const res = await fetch("http://127.0.0.1:8001/agent", {
+      const res = await fetch("http://127.0.0.1:8000/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task: userMsg.content, max_steps: 10 }),
@@ -55,6 +55,7 @@ export default function Home() {
                 content: data.final_answer || "No response.",
                 steps: data.steps || [],
                 plan: data.plan || [],
+                recalled_memories: data.recalled_memories || [],   // NEW
                 status: data.final_answer?.startsWith("ERROR") ? "error" : "done",
               }
             : m
@@ -64,7 +65,7 @@ export default function Home() {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === leoMsgId
-            ? { ...m, content: "Couldn't reach LEO backend. Is it running on port 8001?", status: "error" }
+            ? { ...m, content: "Couldn't reach LEO backend. Is it running on port 8000?", status: "error" }
             : m
         )
       );

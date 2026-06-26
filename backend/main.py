@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from tools import TOOLS, TOOL_DESCRIPTIONS
 from agent import run_agent
 from tools.file_tools import get_file_tree, get_file_content
+from memory import memory_stats
 
 load_dotenv()
 
@@ -97,3 +98,7 @@ def workspace_file(filename: str):
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("error"))
     return result
+
+@app.get("/memory/stats")
+def get_memory_stats():
+    return memory_stats()

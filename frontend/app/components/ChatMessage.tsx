@@ -42,6 +42,13 @@ export default function ChatMessage({ message }: { message: Message }) {
         {/* NEW: Plan tracker */}
         {message.plan && <PlanTracker plan={message.plan} />}
 
+        {message.recalled_memories && message.recalled_memories.length > 0 && (
+          <div className="text-[11px] text-zinc-500 mb-3 italic">
+            🧠 Recalled {message.recalled_memories.length} similar past task
+            {message.recalled_memories.length > 1 ? "s" : ""}
+          </div>
+        )}
+
         {/* Agent steps trace */}
         {message.steps && message.steps.length > 0 && (
           <div className="flex flex-col gap-2 mb-3">

@@ -6,6 +6,31 @@ import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 from tools import TOOLS, TOOL_DESCRIPTIONS
+from memory import (
+    scratchpad_write, scratchpad_read, scratchpad_clear,
+    remember_task, recall_similar_tasks
+)
+
+def classify_failure(tool_name: str, error: str) -> str:
+    """Classify a tool failure to decide how to handle retry."""
+    error_lower = error.lower()
+
+    # Transient — worth an automatic retry
+    transient_signals = ["timeout", "timed out", "connection", "temporarily", "rate limit"]
+    if any(sig in error_lower for sig in transient_signals):
+        return "transient"
+
+    # Bad params — LEO should adjust its approach, not retry blindly
+    param_signals = ["bad parameters", "missing", "required positional", "unexpected keyword"]
+    if any(sig in error_lower for sig in param_signals):
+        return "bad_params"
+
+    # Missing capability — no tool can do this, stop wasting steps
+    if tool_name == "not_found" or "not found" in error_lower and "file" not in error_lower:
+        return "missing_capability"
+
+    # Default — let LEO see it and decide (most code errors fall here)
+    return "general"
 
 # Ensure API key is configured even when imported standalone
 load_dotenv()
@@ -200,17 +225,35 @@ Now write the plan for the task above:"""
 def run_agent(task: str, max_steps: int = 10) -> dict:
     log(f"\n{'='*50}\nNEW TASK: {task}\n{'='*50}")
 
-    # --- NEW: generate plan first ---
+    scratchpad_clear()  # NEW — fresh scratchpad per task
+
     plan = generate_plan(task)
     log(f"PLAN: {json.dumps(plan, indent=2)}")
 
+    # NEW — recall similar past tasks
+    past_memories = recall_similar_tasks(task, n=2)
+    memory_context = ""
+    if past_memories:
+        memory_lines = []
+        for m in past_memories:
+            outcome = "succeeded" if m.get("success") else "failed/incomplete"
+            memory_lines.append(f"- Similar past task ({outcome}): \"{m.get('task')}\" → {m.get('final_answer', '')[:150]}")
+        memory_context = "RELEVANT PAST EXPERIENCE:\n" + "\n".join(memory_lines)
+        log(f"RECALLED MEMORIES:\n{memory_context}")
+
     system = SYSTEM_PROMPT.format(tool_descriptions=format_tool_descriptions())
     plan_text = "\n".join(f"{p['id']}. {p['description']}" for p in plan)
+
     history = [
         f"SYSTEM: {system}",
         f"USER TASK: {task}",
-        f"YOUR PLAN:\n{plan_text}\n(Follow this plan, but adapt if needed. Execute it one step at a time using tools.)"
     ]
+    if memory_context:
+        history.append(memory_context)  # NEW — inject relevant past experience
+    history.append(
+        f"YOUR PLAN:\n{plan_text}\n(Follow this plan, but adapt if needed. Execute it one step at a time using tools.)"
+    )
+
     steps = []
     final_answer = None
     model = genai.GenerativeModel("gemini-flash-lite-latest", generation_config={"temperature": 0.3})
@@ -218,6 +261,7 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
     last_tool_signature = None
     repeat_count = 0
     current_plan_idx = 0  # which plan step we think we're on
+    step_failure_counts = {}
 
     # Mark first plan step as in_progress
     if plan:
@@ -278,7 +322,7 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
                 "tool": tool_name,
                 "params": params,
                 "thought": leo_response,
-                "plan_idx": current_plan_idx  # NEW: tag which plan step this belongs to
+                "plan_idx": current_plan_idx
             })
 
             if tool_name in TOOLS:
@@ -293,12 +337,49 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
                 tool_result = {"success": False, "error": f"Tool '{tool_name}' not found"}
 
             log(f"Tool result: {tool_result}")
-            history.append(f"TOOL RESULT: {json.dumps(tool_result)}")
+
+            # NEW — classify and track failures
+            if not tool_result.get("success"):
+                failure_type = classify_failure(tool_name, tool_result.get("error", ""))
+                step_failure_counts[current_plan_idx] = step_failure_counts.get(current_plan_idx, 0) + 1
+                scratchpad_write(f"Tool '{tool_name}' failed ({failure_type}) with params {params}: {tool_result.get('error')}")
+
+                log(f"FAILURE CLASSIFIED AS: {failure_type} (attempt #{step_failure_counts[current_plan_idx]} on this plan step)")
+
+                # Missing capability — stop wasting steps immediately
+                if failure_type == "missing_capability":
+                    final_answer = f"ERROR: LEO doesn't have a tool capable of this — {tool_result.get('error')}"
+                    steps[-1]["result"] = tool_result
+                    if plan and current_plan_idx < len(plan):
+                        plan[current_plan_idx]["status"] = "failed"
+                    history.append(f"TOOL RESULT: {json.dumps(tool_result)}")
+                    break
+
+                # Too many failures on the same plan step — escalate instead of looping forever
+                if step_failure_counts[current_plan_idx] >= 3:
+                    final_answer = (
+                        f"ERROR: LEO tried {step_failure_counts[current_plan_idx]} times on "
+                        f"'{plan[current_plan_idx]['description'] if plan else 'this step'}' and couldn't succeed. "
+                        f"Last error: {tool_result.get('error')}"
+                    )
+                    steps[-1]["result"] = tool_result
+                    if plan and current_plan_idx < len(plan):
+                        plan[current_plan_idx]["status"] = "failed"
+                    history.append(f"TOOL RESULT: {json.dumps(tool_result)}")
+                    break
+
+                # Give LEO a hint based on failure type, then let it try again
+                hint = {
+                    "transient": "This looked like a temporary issue. Try the same action again.",
+                    "bad_params": "Check the parameter names and types match what the tool expects, then retry with corrected params.",
+                    "general": "Read the error carefully and adjust your approach before retrying."
+                }.get(failure_type, "")
+                history.append(f"TOOL RESULT: {json.dumps(tool_result)}\nHINT: {hint}")
+            else:
+                history.append(f"TOOL RESULT: {json.dumps(tool_result)}")
+
             steps[-1]["result"] = tool_result
 
-            # --- NEW: advance plan progress heuristically ---
-            # Mark current plan step done after a successful tool call,
-            # and move to the next pending plan step.
             if plan and current_plan_idx < len(plan):
                 if tool_result.get("success"):
                     plan[current_plan_idx]["status"] = "done"
@@ -321,10 +402,16 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
     log(f"\nFINAL ANSWER: {final_answer}")
     log(f"FINAL PLAN STATE: {json.dumps(plan, indent=2)}")
 
+    # NEW — store this task in long-term memory for future recall
+    was_successful = final_answer is not None and not final_answer.startswith("ERROR")
+    remember_task(task, final_answer, was_successful)
+
     return {
         "task": task,
-        "plan": plan,           # NEW
+        "plan": plan,
         "steps": steps,
         "final_answer": final_answer,
-        "total_steps": len(steps)
+        "total_steps": len(steps),
+        "scratchpad": scratchpad_read(),       # NEW
+        "recalled_memories": past_memories      # NEW
     }
