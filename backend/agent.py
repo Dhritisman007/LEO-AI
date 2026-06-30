@@ -55,9 +55,10 @@ Rules:
 6. If you cannot complete the task, respond with ERROR: followed by the reason
 7. Always write clean, working code
 8. Never make up tool results — always actually use the tools
-9. When writing Python code with newlines, use actual newlines in the JSON string, escaped as \\n
-10. After running code, always report the output in your DONE: response
-11. Do not explain what you "will do" in plain text without taking an action. Either call a tool or finish with DONE/ERROR.
+9. For tasks that mention git, commits, branches, or pull requests: always create a branch FIRST (git_create_branch), then commit changes (git_commit_changes), then push (git_push_branch), then open the PR (git_open_pull_request) — in that exact order.
+10. When writing Python code with newlines, use actual newlines in the JSON string, escaped as \\n
+11. After running code, always report the output in your DONE: response
+12. Do not explain what you "will do" in plain text without taking an action. Either call a tool or finish with DONE/ERROR.
 
 Example multi-step task:
 User: Write a Python script that prints numbers 1 to 5 and run it
