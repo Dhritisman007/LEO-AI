@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 # pyrefly: ignore [missing-import]
@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from tools import TOOLS, TOOL_DESCRIPTIONS
 from agent import run_agent
 from tools.file_tools import get_file_tree, get_file_content
+from tools.shell_tools import run_python_streaming
 from memory import memory_stats
 
 load_dotenv()
@@ -102,3 +103,20 @@ def workspace_file(filename: str):
 @app.get("/memory/stats")
 def get_memory_stats():
     return memory_stats()
+
+
+@app.websocket("/ws/execute")
+async def websocket_execute(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_json()
+            code = data.get("code", "")
+            if not code:
+                await websocket.send_json({"type": "error", "content": "No code provided"})
+                continue
+            await run_python_streaming(code, websocket)
+    except WebSocketDisconnect:
+        print("WebSocket client disconnected")
+    except Exception as e:
+        print(f"WebSocket error: {e}")

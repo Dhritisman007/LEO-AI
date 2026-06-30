@@ -2,12 +2,15 @@
 import { useState, useRef, useEffect } from "react";
 import ChatMessage from "./components/ChatMessage";
 import ChatInput from "./components/ChatInput";
+import TerminalPanel from "./components/TerminalPanel";
+import { TerminalSquare } from "lucide-react";
 import { Message } from "./types";
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -75,13 +78,24 @@ export default function Home() {
   }
 
   return (
-    <main className="flex flex-col h-screen bg-zinc-950 text-white">
+    <main className="relative flex flex-col h-screen bg-zinc-950 text-white">
       {/* Header */}
-      <div className="border-b border-zinc-800 px-6 py-4 flex items-center gap-2">
-        <span className="text-2xl">🐐</span>
-        <span className="font-bold text-lg">LEO</span>
-        <span className="text-zinc-500 text-sm ml-1">— autonomous coding agent</span>
+      <div className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">🐐</span>
+          <span className="font-bold text-lg">LEO</span>
+          <span className="text-zinc-500 text-sm ml-1">— autonomous coding agent</span>
+        </div>
+        <button
+          onClick={() => setShowTerminal(true)}
+          className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5 transition"
+        >
+          <TerminalSquare size={14} />
+          Terminal
+        </button>
       </div>
+      
+      {showTerminal && <TerminalPanel onClose={() => setShowTerminal(false)} />}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-6">

@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 import tempfile
 import os
@@ -83,3 +84,54 @@ def run_shell(command: str, _retry: int = 0) -> dict:
         return {"success": False, "error": "Command timed out (60s limit)"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+async def run_python_streaming(code: str, websocket):
+    """Run Python in Docker, streaming output line-by-line over a WebSocket."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(code)
+        tmp_path = f.name
+
+    filename = os.path.basename(tmp_path)
+    cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{tmp_path}:/workspace/{filename}",
+        "leo-sandbox", "python3", f"/workspace/{filename}"
+    ]
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        async def stream_output(stream, stream_name):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                text = line.decode().rstrip()
+                await websocket.send_json({
+                    "type": stream_name,
+                    "content": text
+                })
+
+        await asyncio.gather(
+            stream_output(process.stdout, "stdout"),
+            stream_output(process.stderr, "stderr")
+        )
+
+        await process.wait()
+        os.unlink(tmp_path)
+
+        await websocket.send_json({
+            "type": "exit",
+            "exit_code": process.returncode,
+            "success": process.returncode == 0
+        })
+
+    except Exception as e:
+        await websocket.send_json({"type": "error", "content": str(e)})
