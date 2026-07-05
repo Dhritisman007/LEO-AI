@@ -1,1 +1,2 @@
 backend/chroma_db/
+frontend/.env.local
