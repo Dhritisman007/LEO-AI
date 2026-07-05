@@ -12,6 +12,9 @@ from tools.shell_tools import run_python_streaming
 from memory import memory_stats
 from evals.runner import run_single_eval, run_all_evals
 from evals.test_cases import TEST_CASES
+from rate_limiter import check_rate_limit, rate_limit_status
+from sse_starlette.sse import EventSourceResponse
+from agent_streaming import run_agent_streaming
 
 load_dotenv()
 
@@ -95,10 +98,26 @@ def execute(req: ExecuteRequest):
 @app.post("/agent")
 def agent(req: AgentRequest):
     try:
+        check_rate_limit(req.user_id)  # raises 429 if over limit
         result = run_agent(req.task, req.max_steps, req.user_id)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/agent/stream")
+async def agent_stream(task: str, user_id: str = "anonymous", max_steps: int = 10):
+    try:
+        check_rate_limit(user_id)
+    except HTTPException:
+        raise
+
+    async def event_generator():
+        async for chunk in run_agent_streaming(task, max_steps, user_id):
+            yield chunk
+
+    return EventSourceResponse(event_generator())
 
 @app.get("/workspace/tree")
 def workspace_tree(user_id: str = "anonymous"):
@@ -114,6 +133,10 @@ def workspace_file(filename: str, user_id: str = "anonymous"):
 @app.get("/memory/stats")
 def get_memory_stats(user_id: str = "anonymous"):
     return memory_stats(user_id)
+
+@app.get("/rate-limit/{user_id}")
+def get_rate_limit(user_id: str):
+    return rate_limit_status(user_id)
 
 
 @app.get("/evals/cases")

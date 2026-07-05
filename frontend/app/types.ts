@@ -24,3 +24,12 @@ export type Message = {
   status: "pending" | "done" | "error";
   timestamp: number;
 };
+
+// NEW
+export type Conversation = {
+  id: string;
+  title: string;          // first user message, truncated
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+};
