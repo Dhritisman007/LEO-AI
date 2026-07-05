@@ -1,55 +1,59 @@
 import os
 
-WORKSPACE_DIR = "/tmp/leo_workspace"
-os.makedirs(WORKSPACE_DIR, exist_ok=True)
+BASE_WORKSPACE_DIR = "/tmp/leo_workspace"
+
+def get_workspace_dir(user_id: str = "anonymous") -> str:
+    path = os.path.join(BASE_WORKSPACE_DIR, user_id)
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
-def read_file(filename: str) -> dict:
-    """Read a file from the workspace."""
+def read_file(filename: str, user_id: str = "anonymous") -> dict:
     try:
-        filepath = os.path.join(WORKSPACE_DIR, filename)
+        workspace = get_workspace_dir(user_id)
+        filepath = os.path.join(workspace, filename)
         if not os.path.exists(filepath):
             return {"success": False, "error": f"File '{filename}' not found"}
         with open(filepath, "r") as f:
             content = f.read()
-        return {"success": True, "filename": filename, "content": content}
+        return {"success": True, "content": content, "filename": filename}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def write_file(filename: str, content: str) -> dict:
-    """Write content to a file in the workspace."""
+def write_file(filename: str, content: str, user_id: str = "anonymous") -> dict:
     try:
-        filepath = os.path.join(WORKSPACE_DIR, filename)
-        os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
+        workspace = get_workspace_dir(user_id)
+        filepath = os.path.join(workspace, filename)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, "w") as f:
             f.write(content)
-        return {"success": True, "filename": filename, "message": f"File '{filename}' written successfully"}
+        return {"success": True, "message": f"File '{filename}' written successfully"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def list_files() -> dict:
-    """List all files in the workspace."""
+def list_files(user_id: str = "anonymous") -> dict:
     try:
+        workspace = get_workspace_dir(user_id)
         files = []
-        for root, dirs, filenames in os.walk(WORKSPACE_DIR):
+        for root, dirs, filenames in os.walk(workspace):
             for fname in filenames:
-                full_path = os.path.join(root, fname)
-                rel_path = os.path.relpath(full_path, WORKSPACE_DIR)
-                files.append(rel_path)
+                full = os.path.join(root, fname)
+                rel = os.path.relpath(full, workspace)
+                files.append(rel)
         return {"success": True, "files": files}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def get_file_tree() -> dict:
-    """Return files as a nested tree structure for UI rendering."""
+
+def get_file_tree(user_id: str = "anonymous") -> dict:
     try:
+        workspace = get_workspace_dir(user_id)
         tree = {"name": "workspace", "type": "folder", "children": []}
 
-        for root, dirs, filenames in os.walk(WORKSPACE_DIR):
-            rel_root = os.path.relpath(root, WORKSPACE_DIR)
-            # Find the node for this directory
+        for root, dirs, filenames in os.walk(workspace):
+            rel_root = os.path.relpath(root, workspace)
             if rel_root == ".":
                 node = tree
             else:
@@ -64,17 +68,12 @@ def get_file_tree() -> dict:
 
             for fname in sorted(filenames):
                 size = os.path.getsize(os.path.join(root, fname))
-                node["children"].append({
-                    "name": fname,
-                    "type": "file",
-                    "size": size
-                })
+                node["children"].append({"name": fname, "type": "file", "size": size})
 
         return {"success": True, "tree": tree}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def get_file_content(filename: str) -> dict:
-    """Get content of a specific file for preview (alias of read_file, kept separate for clarity)."""
-    return read_file(filename)
+def get_file_content(filename: str, user_id: str = "anonymous") -> dict:
+    return read_file(filename, user_id)

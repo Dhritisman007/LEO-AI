@@ -68,9 +68,11 @@ function FileTreeNode({
 export default function FileTree({
   onFileSelect,
   refreshTrigger,
+  userId,
 }: {
   onFileSelect: (filename: string) => void;
   refreshTrigger: number;
+  userId: string;
 }) {
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -79,7 +81,7 @@ export default function FileTree({
   async function fetchTree() {
     setLoading(true);
     try {
-      const res = await fetch("http://127.0.0.1:8001/workspace/tree");
+      const res = await fetch(`http://localhost:8000/workspace/tree?user_id=${encodeURIComponent(userId)}`);
       const data = await res.json();
       if (data.success) setTree(data.tree);
     } catch {
@@ -91,7 +93,7 @@ export default function FileTree({
 
   useEffect(() => {
     fetchTree();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, userId]);
 
   function handleSelect(filename: string) {
     setSelected(filename);

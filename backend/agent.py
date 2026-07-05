@@ -223,16 +223,16 @@ Now write the plan for the task above:"""
     ]
     return plan
 
-def run_agent(task: str, max_steps: int = 10) -> dict:
-    log(f"\n{'='*50}\nNEW TASK: {task}\n{'='*50}")
+def run_agent(task: str, max_steps: int = 10, user_id: str = "anonymous") -> dict:
+    log(f"\n{'='*50}\nNEW TASK [{user_id}]: {task}\n{'='*50}")
 
-    scratchpad_clear()  # NEW — fresh scratchpad per task
+    scratchpad_clear(user_id)  # NEW — fresh scratchpad per task
 
     plan = generate_plan(task)
     log(f"PLAN: {json.dumps(plan, indent=2)}")
 
     # NEW — recall similar past tasks
-    past_memories = recall_similar_tasks(task, n=2)
+    past_memories = recall_similar_tasks(task, user_id=user_id, n=2)
     memory_context = ""
     if past_memories:
         memory_lines = []
@@ -328,6 +328,10 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
 
             if tool_name in TOOLS:
                 try:
+                    # Inject user_id into file/workspace tools automatically
+                    if tool_name in ["read_file", "write_file", "list_files", "run_python", "run_shell"]:
+                        params["user_id"] = user_id
+                        
                     log(f"Running tool: {tool_name} with {params}")
                     tool_result = TOOLS[tool_name](**params)
                 except TypeError as e:
@@ -343,7 +347,7 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
             if not tool_result.get("success"):
                 failure_type = classify_failure(tool_name, tool_result.get("error", ""))
                 step_failure_counts[current_plan_idx] = step_failure_counts.get(current_plan_idx, 0) + 1
-                scratchpad_write(f"Tool '{tool_name}' failed ({failure_type}) with params {params}: {tool_result.get('error')}")
+                scratchpad_write(f"Tool '{tool_name}' failed ({failure_type}) with params {params}: {tool_result.get('error')}", user_id=user_id)
 
                 log(f"FAILURE CLASSIFIED AS: {failure_type} (attempt #{step_failure_counts[current_plan_idx]} on this plan step)")
 
@@ -405,7 +409,7 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
 
     # NEW — store this task in long-term memory for future recall
     was_successful = final_answer is not None and not final_answer.startswith("ERROR")
-    remember_task(task, final_answer, was_successful)
+    remember_task(task, final_answer, was_successful, user_id=user_id)
 
     return {
         "task": task,
@@ -413,6 +417,6 @@ def run_agent(task: str, max_steps: int = 10) -> dict:
         "steps": steps,
         "final_answer": final_answer,
         "total_steps": len(steps),
-        "scratchpad": scratchpad_read(),       # NEW
+        "scratchpad": scratchpad_read(user_id),       # NEW
         "recalled_memories": past_memories      # NEW
     }

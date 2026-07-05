@@ -10,6 +10,8 @@ from agent import run_agent
 from tools.file_tools import get_file_tree, get_file_content
 from tools.shell_tools import run_python_streaming
 from memory import memory_stats
+from evals.runner import run_single_eval, run_all_evals
+from evals.test_cases import TEST_CASES
 
 load_dotenv()
 
@@ -40,6 +42,15 @@ class ToolRequest(BaseModel):
 class AgentRequest(BaseModel):
     task: str
     max_steps: int = 10
+    user_id: str = "anonymous"
+
+class EvalRequest(BaseModel):
+    categories: list = None
+    user_id: str = "eval_user"
+
+class SingleEvalRequest(BaseModel):
+    test_id: str
+    user_id: str = "eval_user"
 
 @app.get("/")
 def root():
@@ -84,25 +95,61 @@ def execute(req: ExecuteRequest):
 @app.post("/agent")
 def agent(req: AgentRequest):
     try:
-        result = run_agent(req.task, req.max_steps)
+        result = run_agent(req.task, req.max_steps, req.user_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/workspace/tree")
-def workspace_tree():
-    return get_file_tree()
+def workspace_tree(user_id: str = "anonymous"):
+    return get_file_tree(user_id)
 
 @app.get("/workspace/file/{filename:path}")
-def workspace_file(filename: str):
-    result = get_file_content(filename)
+def workspace_file(filename: str, user_id: str = "anonymous"):
+    result = get_file_content(filename, user_id)
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("error"))
     return result
 
 @app.get("/memory/stats")
-def get_memory_stats():
-    return memory_stats()
+def get_memory_stats(user_id: str = "anonymous"):
+    return memory_stats(user_id)
+
+
+@app.get("/evals/cases")
+def list_eval_cases():
+    """List all available test cases."""
+    return {
+        "total": len(TEST_CASES),
+        "cases": [
+            {"id": c["id"], "category": c["category"], "task": c["task"][:80]}
+            for c in TEST_CASES
+        ]
+    }
+
+@app.post("/evals/run")
+def run_evals(req: EvalRequest):
+    """Run all evals (optionally filtered by category)."""
+    try:
+        summary = run_all_evals(
+            categories=req.categories,
+            user_id=req.user_id
+        )
+        return summary
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/evals/run-one")
+def run_one_eval(req: SingleEvalRequest):
+    """Run a single eval by id."""
+    case = next((c for c in TEST_CASES if c["id"] == req.test_id), None)
+    if not case:
+        raise HTTPException(status_code=404, detail=f"Test case '{req.test_id}' not found")
+    try:
+        result = run_single_eval(case, user_id=req.user_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.websocket("/ws/execute")
