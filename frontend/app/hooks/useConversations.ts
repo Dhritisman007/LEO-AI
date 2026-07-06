@@ -66,6 +66,16 @@ export function useConversations() {
     );
   }
 
+  function updateMessage(convoId: string, messageId: string, updater: (m: Message) => Message) {
+    setConversations((prev) =>
+      prev.map((c) => {
+        if (c.id !== convoId) return c;
+        const newMessages = c.messages.map((m) => (m.id === messageId ? updater(m) : m));
+        return { ...c, messages: newMessages, updatedAt: Date.now() };
+      })
+    );
+  }
+
   function deleteConversation(id: string) {
     setConversations((prev) => prev.filter((c) => c.id !== id));
     if (activeConversationId === id) {
@@ -87,6 +97,7 @@ export function useConversations() {
     loaded,
     createConversation,
     updateConversation,
+    updateMessage,
     deleteConversation,
     getActiveConversation,
     switchConversation,

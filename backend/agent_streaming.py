@@ -1,5 +1,6 @@
 import json
 import asyncio
+# pyrefly: ignore [missing-import]
 import google.generativeai as genai
 from tools import TOOLS, TOOL_DESCRIPTIONS
 from memory import (
@@ -19,7 +20,8 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
     """
 
     async def emit(event_type: str, data: dict):
-        yield f"data: {json.dumps({'type': event_type, **data})}\n\n"
+        # EventSourceResponse automatically formats dictionaries to `data: ...\n\n`
+        yield {"data": json.dumps({"type": event_type, **data})}
         await asyncio.sleep(0)  # yield control so FastAPI can flush
 
     scratchpad_clear(user_id)
@@ -45,7 +47,7 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
         history.append("RELEVANT PAST EXPERIENCE:\n" + "\n".join(memory_lines))
     history.append(f"YOUR PLAN:\n{plan_text}\n(Execute one step at a time.)")
 
-    model = genai.GenerativeModel("gemini-1.5-flash", generation_config={"temperature": 0.3})
+    model = genai.GenerativeModel("gemini-flash-lite-latest", generation_config={"temperature": 0.3})
     last_tool_signature = None
     repeat_count = 0
     current_plan_idx = 0

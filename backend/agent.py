@@ -205,7 +205,7 @@ Now write the plan for the task above:"""
 
     model = genai.GenerativeModel(
         "gemini-flash-lite-latest",
-        generation_config={"temperature": 0.3}
+        generation_config={"temperature": 0.4}
     )
     response = model.generate_content(planning_prompt)
     raw = response.text.strip()

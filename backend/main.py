@@ -13,6 +13,7 @@ from memory import memory_stats
 from evals.runner import run_single_eval, run_all_evals
 from evals.test_cases import TEST_CASES
 from rate_limiter import check_rate_limit, rate_limit_status
+# pyrefly: ignore [missing-import]
 from sse_starlette.sse import EventSourceResponse
 from agent_streaming import run_agent_streaming
 
@@ -37,6 +38,12 @@ class ChatRequest(BaseModel):
 class ExecuteRequest(BaseModel):
     code: str
     language: str = "python"
+
+class ExplainRequest(BaseModel):
+    code: str
+    filename: str = "unknown"
+    task: str = ""
+    user_id: str = "anonymous"
 
 class ToolRequest(BaseModel):
     tool: str
@@ -118,6 +125,45 @@ async def agent_stream(task: str, user_id: str = "anonymous", max_steps: int = 1
             yield chunk
 
     return EventSourceResponse(event_generator())
+
+@app.post("/explain")
+async def explain_code(req: ExplainRequest):
+    """Stream a plain-English explanation of code LEO generated."""
+    from fastapi.responses import StreamingResponse
+
+    prompt = f"""You are LEO, a friendly AI coding agent. A user asked you to complete this task:
+
+Task: {req.task}
+
+You generated this code in a file called {req.filename}:
+{req.code}
+
+Now explain this code clearly to the user in plain English. Structure your explanation as:
+
+1. **What it does** — one sentence summary
+2. **How it works** — walk through the logic step by step, in plain English, no jargon
+3. **Key concepts used** — briefly explain any programming concepts a beginner might not know
+4. **Why this approach** — explain why you wrote it this way vs alternatives
+
+Be friendly, clear, and concise. Assume the user is learning."""
+
+    def generate():
+        try:
+            explain_model = genai.GenerativeModel(
+                "gemini-flash-lite-latest",
+                generation_config={"temperature": 0.4}
+            )
+            response = explain_model.generate_content(
+                prompt,
+                stream=True
+            )
+            for chunk in response:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            yield f"Error generating explanation: {str(e)}"
+
+    return StreamingResponse(generate(), media_type="text/plain")
 
 @app.get("/workspace/tree")
 def workspace_tree(user_id: str = "anonymous"):

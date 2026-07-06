@@ -24,6 +24,7 @@ export default function Home() {
     loaded,
     createConversation,
     updateConversation,
+    updateMessage,
     deleteConversation,
     getActiveConversation,
     switchConversation,
@@ -115,14 +116,8 @@ export default function Home() {
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
-        const convo = conversations.find((c) => c.id === convoId);
-        const msgs = convo?.messages || [];
-
         const updateMsg = (updater: (m: Message) => Message) => {
-          updateConversation(
-            convoId!,
-            msgs.map((m) => (m.id === leoMsgId ? updater(m) : m))
-          );
+          updateMessage(convoId!, leoMsgId, updater);
         };
 
         switch (data.type) {
@@ -158,12 +153,12 @@ export default function Home() {
             }));
             break;
 
-          case "thought":
+          case "thinking":
             updateMsg((m) => ({
               ...m,
               steps: [
                 ...(m.steps || []),
-                { step: data.step, type: "thought" as const, content: data.content },
+                { step: data.step, type: "thinking" as const, content: data.content },
               ],
             }));
             break;
@@ -281,7 +276,14 @@ export default function Home() {
                   </p>
                 </div>
               ) : (
-                messages.map((m) => <ChatMessage key={m.id} message={m} />)
+                messages.map((m) => (
+                  <ChatMessage
+                    key={m.id}
+                    message={m}
+                    allMessages={messages}
+                    userId={userId}
+                  />
+                ))
               )}
               <div ref={bottomRef} />
             </div>
