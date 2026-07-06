@@ -1,5 +1,5 @@
 "use client";
-import { Wrench, CheckCircle2, XCircle, Brain, Loader2 } from "lucide-react";
+import { Wrench, CheckCircle2, XCircle, Brain, Loader2, Bot } from "lucide-react";
 import { Message } from "../types";
 import PlanTracker from "./PlanTracker";
 
@@ -32,7 +32,7 @@ export default function ChatMessage({ message }: { message: Message }) {
     <div className="flex justify-start mb-6">
       <div className="max-w-[85%] w-full">
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-lg">🐐</span>
+          <Bot size={18} className="text-zinc-300" />
           <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">LEO</span>
           {message.status === "pending" && (
             <Loader2 size={12} className="animate-spin text-zinc-500" />

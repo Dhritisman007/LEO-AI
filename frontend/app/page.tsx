@@ -12,7 +12,7 @@ import LoginGate from "./components/LoginGate";
 import { useConversations } from "./hooks/useConversations";
 import { Message, Conversation } from "./types";
 import { useSession } from "next-auth/react";
-import { TerminalSquare, FlaskConical } from "lucide-react";
+import { TerminalSquare, FlaskConical, Bot } from "lucide-react";
 
 export default function Home() {
   const { data: session } = useSession();
@@ -248,7 +248,7 @@ export default function Home() {
           {/* Header */}
           <div className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-2xl">🐐</span>
+              <Bot size={24} className="text-zinc-300" />
               <span className="font-bold text-lg">LEO</span>
               <span className="text-zinc-500 text-sm ml-1">— autonomous coding agent</span>
             </div>
@@ -275,7 +275,7 @@ export default function Home() {
             <div className="max-w-2xl mx-auto">
               {!loaded ? null : messages.length === 0 ? (
                 <div className="text-center text-zinc-500 mt-20">
-                  <p className="text-lg">Give LEO a task to get started 🐐</p>
+                  <p className="text-lg">Give LEO a task to get started</p>
                   <p className="text-sm mt-2 text-zinc-600">
                     Try one of the templates below or type your own task
                   </p>

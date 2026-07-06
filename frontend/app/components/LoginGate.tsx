@@ -1,5 +1,6 @@
 "use client";
 import { useSession, signIn, signOut } from "next-auth/react";
+import { Bot } from "lucide-react";
 
 export default function LoginGate({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
@@ -15,7 +16,7 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
   if (!session) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-zinc-950 text-white gap-4">
-        <span className="text-5xl">🐐</span>
+        <Bot size={48} className="text-zinc-300" />
         <h1 className="text-2xl font-bold">LEO</h1>
         <p className="text-zinc-500 text-sm">Sign in to start your own session</p>
         <button
