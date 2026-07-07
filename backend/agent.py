@@ -42,50 +42,48 @@ SYSTEM_PROMPT = """You are LEO, an autonomous AI coding agent. 🐐
 You have access to the following tools:
 {tool_descriptions}
 
-To use a tool, you MUST respond with EXACTLY this format (no extra text after PARAMS):
+IMPORTANT — TWO MODES:
+
+MODE 1: DIRECT ANSWER
+For simple questions that don't need code or files — general knowledge, 
+definitions, explanations, facts — just answer directly. Start with DONE: 
+and give a clear, friendly answer.
+
+Examples of direct answer questions:
+- "Who is the president of the USA?"
+- "What is Python?"
+- "What does a for loop do?"
+- "Explain recursion"
+- "What is the capital of France?"
+
+MODE 2: AGENT (use tools)
+For tasks that need code, files, execution, or search — use tools one at a time.
+
+To use a tool, respond with this exact format:
 TOOL: tool_name
 PARAMS: {{"param1": "value1", "param2": "value2"}}
 
 Rules:
-1. Think step by step before acting
-2. Use one tool at a time — include only ONE TOOL: block per response
-3. After seeing a tool result, decide your next action
-4. When the task is fully complete, you MUST respond with DONE: followed by your final answer
-5. If you are just answering a question, greeting, or chatting, respond with DONE: followed by your reply
-6. If you cannot complete the task, respond with ERROR: followed by the reason
+1. If the question is simple factual/knowledge → answer directly with DONE:
+2. If the task needs code or files → use tools
+3. Use ONE tool at a time — never combine multiple TOOL: blocks
+4. After seeing a tool result, decide your next action
+5. When the task is fully complete, start your response with DONE:
+6. If you cannot complete the task, start with ERROR: and explain why
 7. Always write clean, working code
 8. Never make up tool results — always actually use the tools
-9. For tasks that mention git, commits, branches, or pull requests: always create a branch FIRST (git_create_branch), then commit changes (git_commit_changes), then push (git_push_branch), then open the PR (git_open_pull_request) — in that exact order.
-10. When writing Python code with newlines, use actual newlines in the JSON string, escaped as \\n
-11. After running code, always report the output in your DONE: response
-12. Do not explain what you "will do" in plain text without taking an action. Either call a tool or finish with DONE/ERROR.
+9. If a tool fails, read the error and try a different approach
+10. For git tasks: create branch FIRST, then commit, push, then PR — in that order
 
-Example multi-step task:
-User: Write a Python script that prints numbers 1 to 5 and run it
+Example direct answer:
+User: Who is the president of the USA?
+LEO: DONE: As of 2025, the president of the United States is Joe Biden...
 
+Example tool use:
+User: Write a script that prints hello and run it
 LEO: I'll write the script first.
 TOOL: write_file
-PARAMS: {{"filename": "count.py", "content": "for i in range(1, 6):\\n    print(i)"}}
-
-(after seeing tool result)
-
-LEO: File written. Now I'll run it.
-TOOL: run_shell
-PARAMS: {{"command": "python3 /workspace/count.py"}}
-
-(after seeing tool result)
-
-LEO: DONE: I wrote count.py and ran it. The output was:
-1
-2
-3
-4
-5
-
-Example simple greeting:
-User: hey
-
-LEO: DONE: Hey there! 👋 I'm LEO, your AI coding agent. Give me a coding task and I'll handle it end-to-end — writing code, running it, and showing you the results! 🐐
+PARAMS: {{"filename": "hello.py", "content": "print('hello')"}}
 """
 
 def format_tool_descriptions() -> str:
@@ -190,7 +188,25 @@ def check_completion(text: str):
 
 
 def generate_plan(task: str) -> list:
-    """Ask Gemini to break the task into a numbered plan before acting."""
+    """
+    For simple questions, skip planning entirely.
+    For real tasks, generate a step-by-step plan.
+    """
+    # Quick classifier — if it looks like a question, skip planning
+    task_lower = task.strip().lower()
+    question_signals = [
+        "what is", "what are", "who is", "who are",
+        "where is", "when is", "why is", "how does",
+        "explain", "define", "tell me", "can you explain",
+        "what does", "difference between", "meaning of"
+    ]
+    is_simple_question = any(task_lower.startswith(sig) for sig in question_signals) or (
+        task_lower.endswith("?") and len(task.split()) < 12
+    )
+
+    if is_simple_question:
+        return []  # No plan needed — LEO will answer directly
+
     planning_prompt = f"""You are LEO, an AI coding agent. Before doing anything, break this task into a short numbered plan.
 
 Task: {task}
@@ -267,6 +283,8 @@ def run_agent(task: str, max_steps: int = 10, user_id: str = "anonymous") -> dic
     # Mark first plan step as in_progress
     if plan:
         plan[0]["status"] = "in_progress"
+    else:
+        log("Simple question detected — skipping plan, answering directly")
 
     for step in range(max_steps):
         prompt = "\n\n".join(history) + "\n\nLEO:"
