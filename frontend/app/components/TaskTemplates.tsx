@@ -49,12 +49,12 @@ export default function TaskTemplates({
       <p className="text-[11px] text-zinc-600 uppercase tracking-widest mb-2 ml-1">
         Quick start
       </p>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
         {TEMPLATES.map((t) => (
           <button
             key={t.label}
             onClick={() => onSelect(t.prompt)}
-            className="text-xs bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 text-zinc-300 rounded-lg px-3 py-1.5 transition whitespace-nowrap"
+            className="text-xs bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 text-zinc-300 rounded-lg px-3 py-1.5 transition whitespace-nowrap flex-shrink-0"
           >
             {t.label}
           </button>

@@ -1,50 +1,76 @@
-import asyncio
 import subprocess
 import tempfile
 import os
 import time
 
-WORKSPACE_DIR = "/tmp/leo_workspace"
-os.makedirs(WORKSPACE_DIR, exist_ok=True)
+
+LANGUAGE_CONFIG = {
+    "python": {
+        "extension": ".py",
+        "run_cmd": lambda f: f"python3 /workspace/{f}",
+        "compile_cmd": None,
+    },
+    "javascript": {
+        "extension": ".js",
+        "run_cmd": lambda f: f"node /workspace/{f}",
+        "compile_cmd": None,
+    },
+    "java": {
+        "extension": ".java",
+        # Java needs compile then run — classname must match filename
+        "compile_cmd": lambda f: f"cd /workspace && javac {f}",
+        "run_cmd": lambda f: f"cd /workspace && java {f.replace('.java', '')}",
+    },
+    "cpp": {
+        "extension": ".cpp",
+        "compile_cmd": lambda f: f"cd /workspace && g++ -o program {f}",
+        "run_cmd": lambda f: "cd /workspace && ./program",
+    },
+    "c": {
+        "extension": ".c",
+        "compile_cmd": lambda f: f"cd /workspace && gcc -o program {f}",
+        "run_cmd": lambda f: "cd /workspace && ./program",
+    },
+    "go": {
+        "extension": ".go",
+        "compile_cmd": None,
+        "run_cmd": lambda f: f"cd /workspace && go run {f}",
+    },
+    "rust": {
+        "extension": ".rs",
+        "compile_cmd": lambda f: f"cd /workspace && rustc {f} -o program",
+        "run_cmd": lambda f: "cd /workspace && ./program",
+    },
+    "bash": {
+        "extension": ".sh",
+        "compile_cmd": None,
+        "run_cmd": lambda f: f"bash /workspace/{f}",
+    },
+}
 
 
-def get_user_workspace(user_id: str = "anonymous") -> str:
-    path = os.path.join(WORKSPACE_DIR, user_id)
-    os.makedirs(path, exist_ok=True)
-    return path
+def _run_in_docker(commands: list[str], tmp_path: str, docker_filename: str = None) -> dict:
+    """
+    Mount a temp file into Docker and run one or more shell commands.
+    Commands are joined with && so failure stops the chain.
+    """
+    filename = docker_filename or os.path.basename(tmp_path)
+    full_cmd = " && ".join(commands)
 
+    docker_cmd = (
+        f'docker run --rm '
+        f'-v {tmp_path}:/workspace/{filename} '
+        f'leo-sandbox bash -c "{full_cmd}"'
+    )
 
-def run_python(code: str, user_id: str = "anonymous", _retry: int = 0) -> dict:
-    """Run Python code inside Docker sandbox with workspace mounted."""
     try:
-        workspace = get_user_workspace(user_id)
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, dir=workspace
-        ) as f:
-            f.write(code)
-            tmp_path = f.name
-
-        filename = os.path.basename(tmp_path)
-        cmd = (
-            f"docker run --rm "
-            f"-v {workspace}:/workspace "
-            f"leo-sandbox python3 /workspace/{filename}"
-        )
-
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=60
+            docker_cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=60  # longer timeout for compilation
         )
-        # Clean up the temp file after execution
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-
-        # Detect transient Docker daemon hiccups and retry once automatically
-        if result.returncode != 0 and "Cannot connect to the Docker daemon" in result.stderr and _retry < 1:
-            time.sleep(1)
-            return run_python(code, user_id=user_id, _retry=_retry + 1)
-
         return {
             "success": result.returncode == 0,
             "stdout": result.stdout,
@@ -52,34 +78,82 @@ def run_python(code: str, user_id: str = "anonymous", _retry: int = 0) -> dict:
             "exit_code": result.returncode,
         }
     except subprocess.TimeoutExpired:
-        if _retry < 1:
-            return run_python(code, user_id=user_id, _retry=_retry + 1)
-        return {"success": False, "error": "Code execution timed out (60s limit)"}
+        return {"success": False, "error": "Execution timed out (60s limit)"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def run_shell(command: str, user_id: str = "anonymous", _retry: int = 0) -> dict:
-    """Run a shell command inside Docker sandbox with workspace mounted."""
+def run_code(code: str, language: str = "python", filename: str = None) -> dict:
+    """
+    Universal code runner — handles any supported language.
+    Automatically compiles if needed, then runs.
+    """
+    language = language.lower().strip()
+
+    # Normalize common aliases
+    aliases = {
+        "js": "javascript",
+        "node": "javascript",
+        "c++": "cpp",
+        "cc": "cpp",
+        "golang": "go",
+        "rs": "rust",
+        "sh": "bash",
+        "shell": "bash",
+    }
+    language = aliases.get(language, language)
+
+    config = LANGUAGE_CONFIG.get(language)
+    if not config:
+        return {
+            "success": False,
+            "error": f"Language '{language}' not supported. Supported: {', '.join(LANGUAGE_CONFIG.keys())}"
+        }
+
+    # Java requires filename to match class name
+    if language == "java" and not filename:
+        import re
+        match = re.search(r"public\s+class\s+(\w+)", code)
+        filename = f"{match.group(1)}.java" if match else "Main.java"
+
+    ext = config["extension"]
+    if not filename:
+        filename = f"program{ext}"
+    elif not filename.endswith(ext):
+        filename = filename + ext
+
     try:
-        workspace = get_user_workspace(user_id)
-        # Escape double quotes in the command to prevent shell injection
-        safe_command = command.replace('"', '\\"')
-        cmd = (
-            f'docker run --rm '
-            f'-v {workspace}:/workspace '
-            f'-w /workspace '
-            f'leo-sandbox bash -c "{safe_command}"'
-        )
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=ext, delete=False, prefix=filename.replace(ext, "_")
+        ) as f:
+            f.write(code)
+            tmp_path = f.name
+
+        commands = []
+        if config["compile_cmd"]:
+            commands.append(config["compile_cmd"](filename))
+        commands.append(config["run_cmd"](filename))
+
+        result = _run_in_docker(commands, tmp_path, filename)
+        os.unlink(tmp_path)
+        return result
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# Keep these for backward compatibility — they now call run_code internally
+def run_python(code: str) -> dict:
+    return run_code(code, "python")
+
+
+def run_shell(command: str) -> dict:
+    """Run an arbitrary shell command in the sandbox."""
+    try:
+        cmd = f'docker run --rm leo-sandbox bash -c "{command}"'
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, timeout=60
         )
-
-        # Detect transient Docker daemon hiccups and retry once automatically
-        if result.returncode != 0 and "Cannot connect to the Docker daemon" in result.stderr and _retry < 1:
-            time.sleep(1)
-            return run_shell(command, user_id=user_id, _retry=_retry + 1)
-
         return {
             "success": result.returncode == 0,
             "stdout": result.stdout,
@@ -87,16 +161,14 @@ def run_shell(command: str, user_id: str = "anonymous", _retry: int = 0) -> dict
             "exit_code": result.returncode,
         }
     except subprocess.TimeoutExpired:
-        if _retry < 1:
-            return run_shell(command, user_id=user_id, _retry=_retry + 1)
-        return {"success": False, "error": "Command timed out (60s limit)"}
+        return {"success": False, "error": "Command timed out"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
 async def run_python_streaming(code: str, websocket):
-    """Run Python in Docker, streaming output line-by-line over a WebSocket."""
-    import tempfile
+    """Streaming version for the terminal panel — Python only for now."""
+    import asyncio
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(code)
@@ -110,6 +182,7 @@ async def run_python_streaming(code: str, websocket):
     ]
 
     try:
+        import asyncio
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -121,17 +194,15 @@ async def run_python_streaming(code: str, websocket):
                 line = await stream.readline()
                 if not line:
                     break
-                text = line.decode().rstrip()
                 await websocket.send_json({
                     "type": stream_name,
-                    "content": text
+                    "content": line.decode().rstrip()
                 })
 
         await asyncio.gather(
             stream_output(process.stdout, "stdout"),
             stream_output(process.stderr, "stderr")
         )
-
         await process.wait()
         os.unlink(tmp_path)
 
@@ -140,6 +211,5 @@ async def run_python_streaming(code: str, websocket):
             "exit_code": process.returncode,
             "success": process.returncode == 0
         })
-
     except Exception as e:
         await websocket.send_json({"type": "error", "content": str(e)})

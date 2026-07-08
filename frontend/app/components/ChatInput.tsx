@@ -7,18 +7,20 @@ type Props = {
   onChange: (v: string) => void;
   onSend: () => void;
   disabled: boolean;
+  inputRef?: React.RefObject<HTMLTextAreaElement>;
 };
 
-export default function ChatInput({ value, onChange, onSend, disabled }: Props) {
+export default function ChatInput({ value, onChange, onSend, disabled, inputRef }: Props) {
   const { listening, startListening, stopListening } = useVoiceInput((transcript) => {
     onChange(value ? value + " " + transcript : transcript);
   });
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950 p-4">
-      <div className="max-w-2xl mx-auto flex gap-2">
+    <div className="border-t border-zinc-800 bg-zinc-950 p-3 md:p-4">
+      <div className="flex gap-2 max-w-2xl mx-auto">
         <textarea
-          className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 text-sm resize-none h-12 leading-tight"
+          ref={inputRef}
+          className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 md:px-4 md:py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 text-sm resize-none h-10 md:h-12 leading-tight"
           placeholder={listening ? "Listening... speak now 🎤" : "Give LEO a task..."}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -57,6 +59,9 @@ export default function ChatInput({ value, onChange, onSend, disabled }: Props) 
           🔴 Recording — speak your task, then click stop
         </p>
       )}
+      <p className="text-center text-[10px] text-zinc-700 mt-1">
+        Cmd+K focus · Cmd+N new chat · Cmd+/ terminal · Esc close
+      </p>
     </div>
   );
 }

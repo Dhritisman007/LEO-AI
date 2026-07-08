@@ -38,6 +38,7 @@ class ChatRequest(BaseModel):
 class ExecuteRequest(BaseModel):
     code: str
     language: str = "python"
+    filename: str = None
 
 class ExplainRequest(BaseModel):
     code: str
@@ -96,11 +97,8 @@ def chat(req: ChatRequest):
 
 @app.post("/execute")
 def execute(req: ExecuteRequest):
-    from tools.shell_tools import run_python, run_shell
-    if req.language == "python":
-        return run_python(req.code)
-    else:
-        return run_shell(req.code)
+    from tools.shell_tools import run_code
+    return run_code(req.code, req.language, req.filename)
 
 @app.post("/agent")
 def agent(req: AgentRequest):

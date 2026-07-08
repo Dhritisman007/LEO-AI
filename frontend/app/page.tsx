@@ -12,11 +12,16 @@ import LoginGate from "./components/LoginGate";
 import { useConversations } from "./hooks/useConversations";
 import { Message, Conversation } from "./types";
 import { useSession } from "next-auth/react";
-import { TerminalSquare, FlaskConical, Bot } from "lucide-react";
+import { TerminalSquare, FlaskConical, Bot, Sun, Moon, Menu } from "lucide-react";
+import TypingIndicator from "./components/TypingIndicator";
+import { useTheme } from "./hooks/useTheme";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import toast from "react-hot-toast";
 
 export default function Home() {
   const { data: session } = useSession();
   const userId = (session?.user as any)?.id || "anonymous";
+  const { theme, toggleTheme } = useTheme();
 
   const {
     conversations,
@@ -28,6 +33,7 @@ export default function Home() {
     deleteConversation,
     getActiveConversation,
     switchConversation,
+    renameConversation,
   } = useConversations();
 
   const [input, setInput] = useState("");
@@ -37,10 +43,29 @@ export default function Home() {
   const [showTerminal, setShowTerminal] = useState(false);
   const [showEvals, setShowEvals] = useState(false);
   const [viewingConversation, setViewingConversation] = useState<Conversation | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const activeConversation = getActiveConversation();
   const messages = activeConversation?.messages || [];
+
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useKeyboardShortcuts({
+    onFocusInput: () => inputRef.current?.focus(),
+    onNewConversation: () => {
+      setViewingConversation(null);
+      createConversation();
+    },
+    onOpenTerminal: () => setShowTerminal(true),
+    onClosePanel: () => {
+      setShowTerminal(false);
+      setShowEvals(false);
+      setSelectedFile(null);
+      setViewingConversation(null);
+    },
+    onToggleTheme: toggleTheme,
+  });
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -167,6 +192,7 @@ export default function Home() {
             eventSource.close();
             setSending(false);
             setRefreshTrigger((n) => n + 1);
+            toast.success("LEO completed the task 🐐");
             updateMsg((m) => ({
               ...m,
               content: data.content,
@@ -178,6 +204,7 @@ export default function Home() {
           case "agent_error":
             eventSource.close();
             setSending(false);
+            toast.error("LEO ran into an issue");
             updateMsg((m) => ({
               ...m,
               content: data.content,
@@ -209,23 +236,42 @@ export default function Home() {
 
   return (
     <LoginGate>
-      <main className="flex h-screen bg-zinc-950 text-white">
-        {/* Sidebar */}
-        <div className="w-56 flex-shrink-0">
+      <main className="flex h-screen bg-zinc-950 text-white overflow-hidden">
+        {/* Sidebar — hidden on mobile, shown on desktop */}
+        <div className={`
+          fixed inset-y-0 left-0 z-30 w-56 flex-shrink-0 transform transition-transform duration-200
+          md:relative md:translate-x-0
+          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
+        `}>
           <Sidebar
             conversations={conversations}
             activeConversationId={activeConversationId}
-            onSelectConversation={handleSelectConversation}
-            onNewConversation={handleNewConversation}
+            onSelectConversation={(id) => {
+              handleSelectConversation(id);
+              setSidebarOpen(false);
+            }}
+            onNewConversation={() => {
+              handleNewConversation();
+              setSidebarOpen(false);
+            }}
             onDeleteConversation={deleteConversation}
+            onRenameConversation={renameConversation}
             onFileSelect={setSelectedFile}
             refreshTrigger={refreshTrigger}
             userId={userId}
           />
         </div>
 
+        {/* Mobile overlay — tap to close sidebar */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-20 bg-black/50 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
         {/* Main area */}
-        <div className="flex-1 flex flex-col relative">
+        <div className="flex-1 flex flex-col relative min-w-0">
           {/* Overlays */}
           {selectedFile && (
             <FilePreview filename={selectedFile} onClose={() => setSelectedFile(null)} />
@@ -241,13 +287,26 @@ export default function Home() {
           )}
 
           {/* Header */}
-          <div className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+          <div className="border-b border-zinc-800 px-4 md:px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="md:hidden text-zinc-400 hover:text-white mr-2"
+              >
+                <Menu size={20} />
+              </button>
               <Bot size={24} className="text-zinc-300" />
               <span className="font-bold text-lg">LEO</span>
-              <span className="text-zinc-500 text-sm ml-1">— autonomous coding agent</span>
+              <span className="text-zinc-500 text-sm ml-1 hidden sm:inline">— autonomous coding agent</span>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={toggleTheme}
+                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5 transition"
+              >
+                {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+                {theme === "dark" ? "Light" : "Dark"}
+              </button>
               <button
                 onClick={() => setShowTerminal(true)}
                 className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5 transition"
@@ -285,6 +344,12 @@ export default function Home() {
                   />
                 ))
               )}
+              {sending && messages.length > 0 && 
+                messages[messages.length - 1].status === "pending" &&
+                messages[messages.length - 1].content === "" &&
+                (!messages[messages.length - 1].steps || messages[messages.length - 1].steps?.length === 0) && (
+                  <TypingIndicator />
+              )}
               <div ref={bottomRef} />
             </div>
           </div>
@@ -299,6 +364,7 @@ export default function Home() {
             onChange={setInput}
             onSend={handleSend}
             disabled={sending}
+            inputRef={inputRef}
           />
         </div>
       </main>

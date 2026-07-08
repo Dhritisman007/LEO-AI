@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import Editor from "@monaco-editor/react";
+import { motion } from "framer-motion";
 
 function getLanguage(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase();
@@ -48,7 +49,13 @@ export default function FilePreview({
   if (!filename) return null;
 
   return (
-    <div className="absolute inset-0 bg-zinc-950/98 z-10 flex flex-col">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="absolute inset-0 bg-zinc-950/98 z-10 flex flex-col"
+    >
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded">
@@ -85,6 +92,6 @@ export default function FilePreview({
           />
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }

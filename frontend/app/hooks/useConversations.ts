@@ -91,6 +91,14 @@ export function useConversations() {
     setActiveConversationId(id);
   }
 
+  function renameConversation(id: string, newTitle: string) {
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === id ? { ...c, title: newTitle, updatedAt: Date.now() } : c
+      )
+    );
+  }
+
   return {
     conversations,
     activeConversationId,
@@ -101,5 +109,6 @@ export function useConversations() {
     deleteConversation,
     getActiveConversation,
     switchConversation,
+    renameConversation,
   };
 }

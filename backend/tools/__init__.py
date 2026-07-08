@@ -1,5 +1,5 @@
 from .file_tools import read_file, write_file, list_files, get_file_tree, get_file_content
-from .shell_tools import run_python, run_shell
+from .shell_tools import run_python, run_shell, run_code
 from .search_tools import web_search
 from .git_tools import (
     git_create_branch, git_commit_changes, git_push_branch,
@@ -18,6 +18,7 @@ TOOLS = {
     "git_push_branch": git_push_branch,
     "git_open_pull_request": git_open_pull_request,
     "git_status": git_status,
+    "run_code": run_code,
 }
 
 TOOL_DESCRIPTIONS = [
@@ -86,5 +87,14 @@ TOOL_DESCRIPTIONS = [
         "name": "git_status",
         "description": "Check the current git status of the project repo",
         "parameters": {},
+    },
+    {
+        "name": "run_code",
+        "description": "Execute code in any supported language: python, javascript, java, cpp, c, go, rust, bash",
+        "parameters": {
+            "code": "string — the code to run",
+            "language": "string — python | javascript | java | cpp | c | go | rust | bash",
+            "filename": "string (optional) — filename to use, required for Java to match class name"
+        },
     },
 ]

@@ -74,6 +74,7 @@ Rules:
 8. Never make up tool results — always actually use the tools
 9. If a tool fails, read the error and try a different approach
 10. For git tasks: create branch FIRST, then commit, push, then PR — in that order
+11. When writing code in Java, C++, C, Go, or Rust — use the run_code tool with the correct language parameter instead of run_python. For Java, the filename MUST match the public class name.
 
 Example direct answer:
 User: Who is the president of the USA?

@@ -1,14 +1,20 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { Terminal, Play, X } from "lucide-react";
+import { motion } from "framer-motion";
 
 type TerminalLine = {
   type: "stdout" | "stderr" | "error" | "exit" | "system";
   content: string;
 };
 
+const LANGUAGES = [
+  "python", "javascript", "java", "cpp", "c", "go", "rust", "bash"
+];
+
 export default function TerminalPanel({ onClose }: { onClose: () => void }) {
   const [code, setCode] = useState("");
+  const [language, setLanguage] = useState("python");
   const [lines, setLines] = useState<TerminalLine[]>([]);
   const [running, setRunning] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -34,7 +40,7 @@ export default function TerminalPanel({ onClose }: { onClose: () => void }) {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ code }));
+      ws.send(JSON.stringify({ code, language }));
     };
 
     ws.onmessage = (event) => {
@@ -80,7 +86,13 @@ export default function TerminalPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="absolute inset-0 bg-zinc-950/98 z-20 flex flex-col">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="absolute inset-0 bg-zinc-950/98 z-20 flex flex-col"
+    >
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <Terminal size={16} className="text-zinc-400" />
@@ -93,12 +105,21 @@ export default function TerminalPanel({ onClose }: { onClose: () => void }) {
 
       <textarea
         className="bg-zinc-900 border-b border-zinc-800 px-4 py-3 text-sm font-mono text-zinc-200 placeholder-zinc-600 focus:outline-none h-28 resize-none"
-        placeholder="Write Python code to run live..."
+        placeholder={`Write ${language} code to run live...`}
         value={code}
         onChange={(e) => setCode(e.target.value)}
       />
 
-      <div className="px-4 py-2 border-b border-zinc-800">
+      <div className="px-4 py-2 border-b border-zinc-800 flex items-center justify-between">
+        <select
+          className="bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none"
+          value={language}
+          onChange={(e) => setLanguage(e.target.value)}
+        >
+          {LANGUAGES.map((l) => (
+            <option key={l} value={l}>{l}</option>
+          ))}
+        </select>
         <button
           onClick={runCode}
           disabled={running}
@@ -121,6 +142,6 @@ export default function TerminalPanel({ onClose }: { onClose: () => void }) {
         ))}
         <div ref={bottomRef} />
       </div>
-    </div>
+    </motion.div>
   );
 }

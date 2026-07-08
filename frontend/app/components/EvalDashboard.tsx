@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { X, Play, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { motion } from "framer-motion";
 
 type EvalResult = {
   id: string;
@@ -54,7 +55,13 @@ export default function EvalDashboard({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="absolute inset-0 bg-zinc-950/98 z-20 flex flex-col">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="absolute inset-0 bg-zinc-950/98 z-20 flex flex-col"
+    >
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <span className="text-sm font-semibold text-zinc-300">🧪 LEO Eval Dashboard</span>
         <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
@@ -167,6 +174,6 @@ export default function EvalDashboard({ onClose }: { onClose: () => void }) {
           </>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
