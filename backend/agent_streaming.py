@@ -13,7 +13,7 @@ from agent import (
 )
 from context_engine import format_context_for_prompt
 from checkpoints import save_checkpoint
-from critic import critique_code, rewrite_code
+from critic import pr_review, rewrite_code
 from style_guides import detect_language_from_task, get_style_guide
 
 
