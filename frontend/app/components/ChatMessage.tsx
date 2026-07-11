@@ -41,15 +41,18 @@ function stepColor(type: string) {
 }
 
 function extractCodeFromMessage(message: Message): { code: string; filename: string } | null {
-  // Look through tool call steps for write_file calls
-  const writeSteps = message.steps?.filter(
-    (s) => s.type === "tool_call" && s.tool === "write_file" && s.params?.content
+  const codeSteps = message.steps?.filter(
+    (s) =>
+      s.type === "tool_call" &&
+      ((s.tool === "write_file" && s.params?.content) ||
+       (s.tool === "run_code" && s.params?.code))
   );
-  if (writeSteps && writeSteps.length > 0) {
-    const lastWrite = writeSteps[writeSteps.length - 1];
+
+  if (codeSteps && codeSteps.length > 0) {
+    const lastCode = codeSteps[codeSteps.length - 1];
     return {
-      code: lastWrite.params.content,
-      filename: lastWrite.params.filename || "unknown",
+      code: lastCode.params.content || lastCode.params.code,
+      filename: lastCode.params.filename || "snippet",
     };
   }
   // Fallback — check if final answer contains a code block
@@ -238,6 +241,18 @@ export default function ChatMessage({ message, allMessages, userId, onResume }: 
               </span>
             )}
           </>
+        )}
+
+        {/* Render Code Block */}
+        {message.status === "done" && hasCode && codeInfo && (
+          <div className="mt-4 rounded-xl overflow-hidden border border-zinc-700 bg-[#1e1e1e]">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900/50">
+              <span className="text-xs font-mono text-zinc-400">{codeInfo.filename}</span>
+            </div>
+            <div className="p-4 overflow-x-auto text-xs font-mono text-zinc-300 whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+              {codeInfo.code}
+            </div>
+          </div>
         )}
 
         {/* Action buttons — only show when LEO is done and has code */}
