@@ -20,7 +20,14 @@ export type Message = {
   content: string;
   steps?: AgentStep[];
   plan?: PlanStep[];
-  recalled_memories?: { task: string; success: boolean }[];  // NEW
+  recalled_memories?: { task: string; success: boolean }[];
+  critique?: {
+    score: number;
+    passed: boolean;
+    issues: string[];
+    improvements: string[];
+    rewrite_needed: boolean;
+  };
   status: "pending" | "done" | "error";
   timestamp: number;
 };

@@ -10,6 +10,9 @@ from memory import (
     scratchpad_write, scratchpad_read, scratchpad_clear,
     remember_task, recall_similar_tasks
 )
+from context_engine import format_context_for_prompt
+from critic import critique_code, rewrite_code
+from checkpoints import save_checkpoint
 
 def classify_failure(tool_name: str, error: str) -> str:
     """Classify a tool failure to decide how to handle retry."""
@@ -42,49 +45,44 @@ SYSTEM_PROMPT = """You are LEO, an autonomous AI coding agent. 🐐
 You have access to the following tools:
 {tool_descriptions}
 
+TOOL SELECTION RULES — read before every action:
+- write_file: ONLY for saving code/content to disk. NOT for running code.
+- run_code: ONLY for executing code. Always specify the language parameter.
+- run_shell: ONLY for shell commands that aren't running a code file (e.g. ls, pip install, mkdir)
+- read_file: ONLY when you need to verify file contents AFTER writing. Don't read files you just wrote.
+- list_files: ONLY when you need to see what exists. Don't call this every step.
+- web_search: ONLY when you need external information not in your training data.
+- git_*: ONLY for version control operations explicitly requested by the user.
+
+COMMON MISTAKES TO AVOID:
+- Don't run_python to "test" code you haven't written yet — write_file first
+- Don't web_search for basic language syntax you already know
+- Don't read_file immediately after write_file — you just wrote it, you know the content
+- Don't list_files unless you genuinely don't know what exists
+
 IMPORTANT — TWO MODES:
 
 MODE 1: DIRECT ANSWER
-For simple questions that don't need code or files — general knowledge, 
-definitions, explanations, facts — just answer directly. Start with DONE: 
-and give a clear, friendly answer.
-
-Examples of direct answer questions:
-- "Who is the president of the USA?"
-- "What is Python?"
-- "What does a for loop do?"
-- "Explain recursion"
-- "What is the capital of France?"
+For simple questions — general knowledge, definitions, facts — answer directly with DONE:
 
 MODE 2: AGENT (use tools)
-For tasks that need code, files, execution, or search — use tools one at a time.
+For tasks needing code, files, or execution — use tools one at a time.
 
-To use a tool, respond with this exact format:
+Format:
 TOOL: tool_name
-PARAMS: {{"param1": "value1", "param2": "value2"}}
+PARAMS: {{"param1": "value1"}}
 
 Rules:
-1. If the question is simple factual/knowledge → answer directly with DONE:
-2. If the task needs code or files → use tools
-3. Use ONE tool at a time — never combine multiple TOOL: blocks
-4. After seeing a tool result, decide your next action
-5. When the task is fully complete, start your response with DONE:
-6. If you cannot complete the task, start with ERROR: and explain why
-7. Always write clean, working code
-8. Never make up tool results — always actually use the tools
-9. If a tool fails, read the error and try a different approach
-10. For git tasks: create branch FIRST, then commit, push, then PR — in that order
-11. When writing code in Java, C++, C, Go, or Rust — use the run_code tool with the correct language parameter instead of run_python. For Java, the filename MUST match the public class name.
-
-Example direct answer:
-User: Who is the president of the USA?
-LEO: DONE: As of 2025, the president of the United States is Joe Biden...
-
-Example tool use:
-User: Write a script that prints hello and run it
-LEO: I'll write the script first.
-TOOL: write_file
-PARAMS: {{"filename": "hello.py", "content": "print('hello')"}}
+1. Simple questions → answer directly with DONE:
+2. Before each tool call, ask yourself: is this the RIGHT tool for this step?
+3. Use ONE tool at a time
+4. When complete → DONE:
+5. If stuck → ERROR: with explanation
+6. Write clean, idiomatic code in the requested language
+7. Never repeat a failing tool call with the same params
+8. For Java: filename MUST match the public class name
+9. For git tasks: branch → commit → push → PR in that order
+10. Always use run_code with the correct language param, never run_python for non-Python code
 """
 
 def format_tool_descriptions() -> str:
@@ -240,52 +238,82 @@ Now write the plan for the task above:"""
     ]
     return plan
 
-def run_agent(task: str, max_steps: int = 10, user_id: str = "anonymous") -> dict:
+def run_agent(
+    task: str,
+    max_steps: int = 10,
+    user_id: str = "anonymous",
+    checkpoint: dict = None  # NEW
+) -> dict:
     log(f"\n{'='*50}\nNEW TASK [{user_id}]: {task}\n{'='*50}")
 
-    scratchpad_clear(user_id)  # NEW — fresh scratchpad per task
+    # Resume from checkpoint if provided
+    if checkpoint:
+        log(f"RESUMING from checkpoint — {len(checkpoint['steps'])} steps already done")
+        history = checkpoint["history"]
+        steps = checkpoint["steps"]
+        plan = checkpoint["plan"]
+        current_plan_idx = checkpoint["current_plan_idx"]
+        scratchpad_clear(user_id)
+        
+        # Build workspace context for the prompt
+        workspace_context = format_context_for_prompt(user_id)
+        
+        # Recall similar past tasks (optional for resume, but good to have)
+        past_memories = recall_similar_tasks(task, user_id=user_id, n=2)
+        memory_context = ""
+    else:
+        # Normal fresh start
+        scratchpad_clear(user_id)  # NEW — fresh scratchpad per task
+    
+        # Build workspace context — LEO reads the codebase before acting
+        workspace_context = format_context_for_prompt(user_id)
+        log(f"WORKSPACE CONTEXT BUILT: {len(workspace_context)} chars")
+    
+        plan = generate_plan(task)
+        log(f"PLAN: {json.dumps(plan, indent=2)}")
+    
+        # NEW — recall similar past tasks
+        past_memories = recall_similar_tasks(task, user_id=user_id, n=2)
+        memory_context = ""
+        if past_memories:
+            memory_lines = []
+            for m in past_memories:
+                outcome = "succeeded" if m.get("success") else "failed/incomplete"
+                memory_lines.append(f"- Similar past task ({outcome}): \"{m.get('task')}\" → {m.get('final_answer', '')[:150]}")
+            memory_context = "RELEVANT PAST EXPERIENCE:\n" + "\n".join(memory_lines)
+            log(f"RECALLED MEMORIES:\n{memory_context}")
+    
+        system = SYSTEM_PROMPT.format(tool_descriptions=format_tool_descriptions())
+        plan_text = "\n".join(f"{p['id']}. {p['description']}" for p in plan)
+    
+        history = [
+            f"SYSTEM: {system}",
+            f"USER TASK: {task}",
+            f"{workspace_context}",  # NEW — LEO sees the whole workspace
+        ]
+        if memory_context:
+            history.append(memory_context)
+        history.append(
+            f"YOUR PLAN:\n{plan_text}\n(Execute one step at a time.)"
+        )
+    
+        steps = []
+        current_plan_idx = 0  # which plan step we think we're on
 
-    plan = generate_plan(task)
-    log(f"PLAN: {json.dumps(plan, indent=2)}")
-
-    # NEW — recall similar past tasks
-    past_memories = recall_similar_tasks(task, user_id=user_id, n=2)
-    memory_context = ""
-    if past_memories:
-        memory_lines = []
-        for m in past_memories:
-            outcome = "succeeded" if m.get("success") else "failed/incomplete"
-            memory_lines.append(f"- Similar past task ({outcome}): \"{m.get('task')}\" → {m.get('final_answer', '')[:150]}")
-        memory_context = "RELEVANT PAST EXPERIENCE:\n" + "\n".join(memory_lines)
-        log(f"RECALLED MEMORIES:\n{memory_context}")
-
-    system = SYSTEM_PROMPT.format(tool_descriptions=format_tool_descriptions())
-    plan_text = "\n".join(f"{p['id']}. {p['description']}" for p in plan)
-
-    history = [
-        f"SYSTEM: {system}",
-        f"USER TASK: {task}",
-    ]
-    if memory_context:
-        history.append(memory_context)  # NEW — inject relevant past experience
-    history.append(
-        f"YOUR PLAN:\n{plan_text}\n(Follow this plan, but adapt if needed. Execute it one step at a time using tools.)"
-    )
-
-    steps = []
     final_answer = None
     model = genai.GenerativeModel("gemini-flash-lite-latest", generation_config={"temperature": 0.3})
 
     last_tool_signature = None
     repeat_count = 0
-    current_plan_idx = 0  # which plan step we think we're on
     step_failure_counts = {}
 
-    # Mark first plan step as in_progress
-    if plan:
-        plan[0]["status"] = "in_progress"
-    else:
-        log("Simple question detected — skipping plan, answering directly")
+    # Mark first plan step as in_progress if starting fresh
+    if not checkpoint:
+        if plan:
+            plan[0]["status"] = "in_progress"
+        else:
+            log("Simple question detected — skipping plan, answering directly")
+
 
     for step in range(max_steps):
         prompt = "\n\n".join(history) + "\n\nLEO:"
@@ -321,6 +349,32 @@ def run_agent(task: str, max_steps: int = 10, user_id: str = "anonymous") -> dic
         tool_name, params = parse_tool_call(leo_response)
 
         if tool_name:
+            # NEW — quick sanity check on tool selection
+            if tool_name == "read_file" and any(
+                s.get("tool") == "write_file" and s.get("params", {}).get("filename") == params.get("filename")
+                for s in steps[-3:]
+            ):
+                # LEO is trying to read a file it just wrote — skip it
+                log(f"TOOL SKIP: Skipping read_file for {params.get('filename')} — just wrote it")
+                history.append(
+                    f"SYSTEM NOTE: You just wrote {params.get('filename')} — no need to read it back. Continue with the next step."
+                )
+                steps.append({
+                    "step": step + 1,
+                    "type": "thought",
+                    "content": f"Skipped unnecessary read_file for {params.get('filename')}"
+                })
+                continue
+
+            if tool_name == "web_search" and any(
+                s.get("tool") == "web_search" and s.get("params", {}).get("query") == params.get("query")
+                for s in steps
+            ):
+                # Same search called twice — skip it
+                log(f"TOOL SKIP: Duplicate web_search for '{params.get('query')}'")
+                history.append("SYSTEM NOTE: You already searched for this. Use the previous result.")
+                continue
+
             signature = f"{tool_name}:{json.dumps(params, sort_keys=True)}"
             if signature == last_tool_signature:
                 repeat_count += 1
@@ -328,7 +382,7 @@ def run_agent(task: str, max_steps: int = 10, user_id: str = "anonymous") -> dic
                 repeat_count = 0
             last_tool_signature = signature
 
-            if repeat_count >= 2:
+            if repeat_count >= 2 or (repeat_count >= 1 and tool_name in ["run_code", "run_python", "run_shell"]):
                 log("LOOP DETECTED — stopping")
                 final_answer = "ERROR: LEO got stuck repeating the same action. Task stopped."
                 steps.append({"step": step + 1, "type": "error", "content": final_answer})
@@ -348,7 +402,14 @@ def run_agent(task: str, max_steps: int = 10, user_id: str = "anonymous") -> dic
             if tool_name in TOOLS:
                 try:
                     # Inject user_id into file/workspace tools automatically
-                    if tool_name in ["read_file", "write_file", "list_files", "run_python", "run_shell"]:
+                    USER_SCOPED_TOOLS = [
+                        "read_file",
+                        "write_file",
+                        "list_files",
+                        "get_file_tree",
+                        "get_file_content",
+                    ]
+                    if tool_name in USER_SCOPED_TOOLS:
                         params["user_id"] = user_id
                         
                     log(f"Running tool: {tool_name} with {params}")
@@ -420,8 +481,15 @@ def run_agent(task: str, max_steps: int = 10, user_id: str = "anonymous") -> dic
             )
 
     if not final_answer:
-        final_answer = "Task incomplete — max steps reached without finishing."
-        steps.append({"step": max_steps + 1, "type": "error", "content": final_answer})
+        # Save checkpoint so task can be resumed
+        checkpoint_id = save_checkpoint(user_id, task, history, steps, plan, current_plan_idx)
+        final_answer = f"PAUSED: Max steps ({max_steps}) reached. Task can be resumed — checkpoint saved: {checkpoint_id}"
+        steps.append({
+            "step": max_steps + 1,
+            "type": "error",
+            "content": final_answer,
+            "checkpoint_id": checkpoint_id  # NEW
+        })
 
     log(f"\nFINAL ANSWER: {final_answer}")
     log(f"FINAL PLAN STATE: {json.dumps(plan, indent=2)}")
@@ -430,12 +498,55 @@ def run_agent(task: str, max_steps: int = 10, user_id: str = "anonymous") -> dic
     was_successful = final_answer is not None and not final_answer.startswith("ERROR")
     remember_task(task, final_answer, was_successful, user_id=user_id)
 
+    # NEW — self-improvement critic pass
+    # Find the last write_file + run_code pair
+    last_code = None
+    last_filename = None
+    last_output = ""
+
+    for s in reversed(steps):
+        if s.get("type") == "tool_call":
+            if s.get("tool") == "run_code" and not last_output:
+                result = s.get("result", {})
+                last_output = result.get("stdout", "") + result.get("stderr", "")
+            if s.get("tool") in ("write_file", "run_code") and not last_code:
+                params = s.get("params", {})
+                if "code" in params:
+                    last_code = params["code"]
+                    last_filename = params.get("filename", "code")
+                elif "content" in params:
+                    last_code = params["content"]
+                    last_filename = params.get("filename", "code")
+            if last_code and last_output:
+                break
+
+    critique = None
+    if last_code and was_successful:
+        log("CRITIC: Reviewing LEO's output...")
+        critique = critique_code(task, last_code, last_output)
+        log(f"CRITIC RESULT: score={critique.get('score')} rewrite={critique.get('rewrite_needed')}")
+
+        if critique.get("rewrite_needed") and critique.get("score", 10) < 6:
+            log("CRITIC: Rewriting code due to low score...")
+            improved_code = rewrite_code(
+                last_code,
+                critique.get("issues", []),
+                critique.get("improvements", [])
+            )
+            # Save the improved version
+            if last_filename and improved_code != last_code:
+                from tools.file_tools import write_file
+                write_file(last_filename, improved_code, user_id)
+                final_answer += f"\n\n(LEO self-improved this code — {len(critique.get('issues', []))} issue(s) fixed)"
+                log("CRITIC: Rewrite saved successfully")
+
     return {
         "task": task,
         "plan": plan,
         "steps": steps,
         "final_answer": final_answer,
         "total_steps": len(steps),
-        "scratchpad": scratchpad_read(user_id),       # NEW
-        "recalled_memories": past_memories      # NEW
+        "scratchpad": scratchpad_read(user_id),
+        "recalled_memories": past_memories,
+        "critique": critique,  # NEW
     }

@@ -5,11 +5,12 @@ import ChatMessage from "./ChatMessage";
 
 type Props = {
   conversation: Conversation;
+  userId: string;
   onClose: () => void;
   onResume: (conversation: Conversation) => void;
 };
 
-export default function ConversationViewer({ conversation, onClose, onResume }: Props) {
+export default function ConversationViewer({ conversation, userId, onClose, onResume }: Props) {
   return (
     <div className="absolute inset-0 bg-zinc-950/98 z-10 flex flex-col">
       {/* Header */}
@@ -49,7 +50,12 @@ export default function ConversationViewer({ conversation, onClose, onResume }: 
             </span>
           </div>
           {conversation.messages.map((m) => (
-            <ChatMessage key={m.id} message={m} />
+            <ChatMessage 
+              key={m.id} 
+              message={m} 
+              allMessages={conversation.messages} 
+              userId={userId} 
+            />
           ))}
         </div>
       </div>

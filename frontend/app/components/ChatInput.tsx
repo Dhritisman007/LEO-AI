@@ -7,10 +7,12 @@ type Props = {
   onChange: (v: string) => void;
   onSend: () => void;
   disabled: boolean;
-  inputRef?: React.RefObject<HTMLTextAreaElement>;
+  inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+  multiAgent?: boolean;
+  onToggleMultiAgent?: () => void;
 };
 
-export default function ChatInput({ value, onChange, onSend, disabled, inputRef }: Props) {
+export default function ChatInput({ value, onChange, onSend, disabled, inputRef, multiAgent, onToggleMultiAgent }: Props) {
   const { listening, startListening, stopListening } = useVoiceInput((transcript) => {
     onChange(value ? value + " " + transcript : transcript);
   });
@@ -31,6 +33,19 @@ export default function ChatInput({ value, onChange, onSend, disabled, inputRef 
             }
           }}
         />
+
+        {/* Multi-agent toggle */}
+        <button
+          onClick={onToggleMultiAgent}
+          className={`text-xs px-2 py-1 rounded-xl border transition flex items-center justify-center ${
+            multiAgent
+              ? "border-purple-600 bg-purple-950/50 text-purple-400"
+              : "border-zinc-700 bg-zinc-800 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300"
+          }`}
+          title="Multi-agent mode: LEO spawns parallel sub-agents"
+        >
+          {multiAgent ? "🤖 Multi" : "🤖 Single"}
+        </button>
 
         {/* Mic button */}
         <button

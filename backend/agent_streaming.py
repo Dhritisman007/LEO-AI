@@ -4,13 +4,16 @@ import asyncio
 import google.generativeai as genai
 from tools import TOOLS, TOOL_DESCRIPTIONS
 from memory import (
-    scratchpad_write, scratchpad_clear,
+    scratchpad_write, scratchpad_read, scratchpad_clear,
     remember_task, recall_similar_tasks
 )
 from agent import (
     SYSTEM_PROMPT, generate_plan, parse_tool_call,
     format_tool_descriptions, classify_failure, log
 )
+from context_engine import format_context_for_prompt
+from checkpoints import save_checkpoint
+from critic import critique_code, rewrite_code
 
 
 async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "anonymous"):
@@ -25,6 +28,10 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
         await asyncio.sleep(0)  # yield control so FastAPI can flush
 
     scratchpad_clear(user_id)
+
+    # Build workspace context — LEO reads the codebase before acting
+    workspace_context = format_context_for_prompt(user_id)
+    log(f"WORKSPACE CONTEXT BUILT (streaming): {len(workspace_context)} chars")
 
     # Emit plan first
     plan = generate_plan(task)
@@ -41,6 +48,7 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
     history = [
         f"SYSTEM: {system}",
         f"USER TASK: {task}",
+        f"{workspace_context}",  # LEO sees the whole workspace
     ]
     if past_memories:
         memory_lines = [f"- Past task: \"{m.get('task')}\"" for m in past_memories]
@@ -52,6 +60,8 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
     repeat_count = 0
     current_plan_idx = 0
     step_failure_counts = {}
+    step_history = []  # lightweight tracker for pre-tool reasoning
+    steps = []  # full steps tracker for checkpointing
     final_answer = None
 
     if plan:
@@ -82,7 +92,48 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
             for p in plan:
                 if p["status"] != "failed":
                     p["status"] = "done"
-            async for chunk in emit("done", {"content": final_answer, "plan": plan}):
+
+            # NEW — self-improvement critic pass
+            last_code = None
+            last_filename = None
+            last_output = ""
+
+            for s in reversed(steps):
+                if s.get("type") == "tool_call":
+                    if s.get("tool") == "run_code" and not last_output:
+                        result = s.get("result", {})
+                        last_output = result.get("stdout", "") + result.get("stderr", "")
+                    if s.get("tool") in ("write_file", "run_code") and not last_code:
+                        params = s.get("params", {})
+                        if "code" in params:
+                            last_code = params["code"]
+                            last_filename = params.get("filename", "code")
+                        elif "content" in params:
+                            last_code = params["content"]
+                            last_filename = params.get("filename", "code")
+                    if last_code and last_output:
+                        break
+
+            critique = None
+            if last_code:
+                log("CRITIC: Reviewing LEO's output...")
+                critique = critique_code(task, last_code, last_output)
+                log(f"CRITIC RESULT: score={critique.get('score')} rewrite={critique.get('rewrite_needed')}")
+
+                if critique.get("rewrite_needed") and critique.get("score", 10) < 6:
+                    log("CRITIC: Rewriting code due to low score...")
+                    improved_code = rewrite_code(
+                        last_code,
+                        critique.get("issues", []),
+                        critique.get("improvements", [])
+                    )
+                    if last_filename and improved_code != last_code:
+                        from tools.file_tools import write_file
+                        write_file(last_filename, improved_code, user_id)
+                        final_answer += f"\n\n(LEO self-improved this code — {len(critique.get('issues', []))} issue(s) fixed)"
+                        log("CRITIC: Rewrite saved successfully")
+
+            async for chunk in emit("done", {"content": final_answer, "plan": plan, "critique": critique}):
                 yield chunk
             break
 
@@ -97,6 +148,27 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
         tool_name, params = parse_tool_call(leo_response)
 
         if tool_name:
+            # NEW — quick sanity check on tool selection
+            if tool_name == "read_file" and any(
+                s.get("tool") == "write_file" and s.get("params", {}).get("filename") == params.get("filename")
+                for s in step_history[-3:]
+            ):
+                log(f"TOOL SKIP: Skipping read_file for {params.get('filename')} — just wrote it")
+                history.append(
+                    f"SYSTEM NOTE: You just wrote {params.get('filename')} — no need to read it back. Continue with the next step."
+                )
+                async for chunk in emit("thought", {"step": step + 1, "content": f"Skipped unnecessary read_file for {params.get('filename')}"}):
+                    yield chunk
+                continue
+
+            if tool_name == "web_search" and any(
+                s.get("tool") == "web_search" and s.get("params", {}).get("query") == params.get("query")
+                for s in step_history
+            ):
+                log(f"TOOL SKIP: Duplicate web_search for '{params.get('query')}'")
+                history.append("SYSTEM NOTE: You already searched for this. Use the previous result.")
+                continue
+
             signature = f"{tool_name}:{json.dumps(params, sort_keys=True)}"
             if signature == last_tool_signature:
                 repeat_count += 1
@@ -104,11 +176,23 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
                 repeat_count = 0
             last_tool_signature = signature
 
-            if repeat_count >= 2:
+            if repeat_count >= 2 or (repeat_count >= 1 and tool_name in ["run_code", "run_python", "run_shell"]):
                 final_answer = "ERROR: LEO got stuck in a loop."
+                steps.append({"step": step + 1, "type": "error", "content": final_answer})
                 async for chunk in emit("agent_error", {"content": final_answer, "plan": plan}):
                     yield chunk
                 break
+
+            # Track this tool call for future sanity checks
+            step_history.append({"tool": tool_name, "params": params})
+            steps.append({
+                "step": step + 1,
+                "type": "tool_call",
+                "tool": tool_name,
+                "params": params,
+                "thought": leo_response,
+                "plan_idx": current_plan_idx
+            })
 
             # Emit tool call start
             async for chunk in emit("tool_start", {
@@ -121,7 +205,14 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
 
             if tool_name in TOOLS:
                 try:
-                    if tool_name in ["read_file", "write_file", "list_files"]:
+                    USER_SCOPED_TOOLS = [
+                        "read_file",
+                        "write_file",
+                        "list_files",
+                        "get_file_tree",
+                        "get_file_content",
+                    ]
+                    if tool_name in USER_SCOPED_TOOLS:
                         params["user_id"] = user_id
                     tool_result = TOOLS[tool_name](**params)
                 except TypeError as e:
@@ -146,6 +237,7 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
 
                 if failure_type == "missing_capability" or step_failure_counts[current_plan_idx] >= 3:
                     final_answer = f"ERROR: Could not complete — {tool_result.get('error')}"
+                    steps[-1]["result"] = tool_result
                     if plan and current_plan_idx < len(plan):
                         plan[current_plan_idx]["status"] = "failed"
                     async for chunk in emit("agent_error", {"content": final_answer, "plan": plan}):
@@ -153,9 +245,11 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
                     history.append(f"TOOL RESULT: {json.dumps(tool_result)}")
                     break
 
+                steps[-1]["result"] = tool_result
                 hint = {"transient": "Retry.", "bad_params": "Fix the parameters.", "general": "Adjust your approach."}.get(failure_type, "")
                 history.append(f"TOOL RESULT: {json.dumps(tool_result)}\nHINT: {hint}")
             else:
+                steps[-1]["result"] = tool_result
                 history.append(f"TOOL RESULT: {json.dumps(tool_result)}")
 
             if plan and current_plan_idx < len(plan):
@@ -170,12 +264,14 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
                 async for chunk in emit("plan_update", {"plan": plan}):
                     yield chunk
         else:
+            steps.append({"step": step + 1, "type": "thought", "content": leo_response})
             async for chunk in emit("thought", {"step": step + 1, "content": leo_response}):
                 yield chunk
             history.append("SYSTEM REMINDER: Use TOOL:/PARAMS: format or finish with DONE:/ERROR:")
 
     if not final_answer:
-        final_answer = "Task incomplete — max steps reached."
+        checkpoint_id = save_checkpoint(user_id, task, history, steps, plan, current_plan_idx)
+        final_answer = f"PAUSED: Max steps ({max_steps}) reached. Task can be resumed — checkpoint saved: {checkpoint_id}"
         async for chunk in emit("agent_error", {"content": final_answer, "plan": plan}):
             yield chunk
 

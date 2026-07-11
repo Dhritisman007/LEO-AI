@@ -38,6 +38,7 @@ export default function Home() {
 
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [multiAgent, setMultiAgent] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showTerminal, setShowTerminal] = useState(false);
@@ -135,10 +136,46 @@ export default function Home() {
     setSending(true);
 
     try {
-      const url = `http://localhost:8000/agent/stream?task=${encodeURIComponent(userMsg.content)}&user_id=${encodeURIComponent(userId)}&max_steps=10`;
-      const eventSource = new EventSource(url);
+      if (multiAgent) {
+        fetch("http://localhost:8000/agent/multi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task: userMsg.content, user_id: userId }),
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            setSending(false);
+            setRefreshTrigger((n) => n + 1);
+            if (data.final_answer) {
+              updateMessage(convoId!, leoMsgId, (m) => ({
+                ...m,
+                content: data.final_answer,
+                steps: data.steps,
+                status: "done" as const,
+              }));
+              toast.success("LEO completed the task 🐐");
+            } else {
+              toast.error("LEO ran into an issue");
+              updateMessage(convoId!, leoMsgId, (m) => ({
+                ...m,
+                content: data.detail || "Error",
+                status: "error" as const,
+              }));
+            }
+          })
+          .catch((err) => {
+            setSending(false);
+            updateMessage(convoId!, leoMsgId, (m) => ({
+              ...m,
+              content: "Connection to LEO lost.",
+              status: "error" as const,
+            }));
+          });
+      } else {
+        const url = `http://localhost:8000/agent/stream?task=${encodeURIComponent(userMsg.content)}&user_id=${encodeURIComponent(userId)}&max_steps=10`;
+        const eventSource = new EventSource(url);
 
-      eventSource.onmessage = (event) => {
+        eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
         const updateMsg = (updater: (m: Message) => Message) => {
@@ -183,7 +220,7 @@ export default function Home() {
               ...m,
               steps: [
                 ...(m.steps || []),
-                { step: data.step, type: "thinking" as const, content: data.content },
+                { step: data.step, type: "thought" as const, content: data.content },
               ],
             }));
             break;
@@ -197,6 +234,7 @@ export default function Home() {
               ...m,
               content: data.content,
               plan: data.plan,
+              critique: data.critique || null,
               status: "done" as const,
             }));
             break;
@@ -218,19 +256,53 @@ export default function Home() {
       eventSource.onerror = () => {
         eventSource.close();
         setSending(false);
-        const convo = conversations.find((c) => c.id === convoId);
-        const msgs = convo?.messages || [];
-        updateConversation(
-          convoId!,
-          msgs.map((m) =>
-            m.id === leoMsgId
-              ? { ...m, content: "Connection to LEO lost.", status: "error" as const }
-              : m
-          )
-        );
+        updateMessage(convoId!, leoMsgId, (m) => ({
+          ...m,
+          content: m.content || "Connection to LEO lost.",
+          status: "error" as const,
+        }));
       };
+      }
     } catch {
       setSending(false);
+    }
+  }
+
+  async function handleResume(checkpointId: string) {
+    if (!activeConversationId) return;
+    setSending(true);
+
+    try {
+      const res = await fetch("http://localhost:8000/agent/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checkpoint_id: checkpointId, user_id: userId, additional_steps: 20 }),
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        toast.success("Task resumed successfully");
+        const leoMsgId = Math.random().toString(36).substring(7);
+        const leoMsg: Message = {
+          id: leoMsgId,
+          role: "leo",
+          content: data.final_answer || "Task complete",
+          steps: data.steps,
+          plan: data.plan,
+          critique: data.critique || null,
+          status: (data.final_answer && data.final_answer.startsWith("ERROR")) ? "error" : "done",
+          timestamp: Date.now(),
+        };
+        const currentMessages = getActiveConversation()?.messages || [];
+        updateConversation(activeConversationId, [...currentMessages, leoMsg]);
+      } else {
+        toast.error("Failed to resume task: " + data.detail);
+      }
+    } catch (err) {
+      toast.error("Error connecting to server");
+    } finally {
+      setSending(false);
+      setRefreshTrigger(n => n + 1);
     }
   }
 
@@ -281,6 +353,7 @@ export default function Home() {
           {viewingConversation && (
             <ConversationViewer
               conversation={viewingConversation}
+              userId={userId}
               onClose={() => setViewingConversation(null)}
               onResume={handleResumeConversation}
             />
@@ -341,6 +414,7 @@ export default function Home() {
                     message={m}
                     allMessages={messages}
                     userId={userId}
+                    onResume={handleResume}
                   />
                 ))
               )}
@@ -365,6 +439,8 @@ export default function Home() {
             onSend={handleSend}
             disabled={sending}
             inputRef={inputRef}
+            multiAgent={multiAgent}
+            onToggleMultiAgent={() => setMultiAgent(!multiAgent)}
           />
         </div>
       </main>

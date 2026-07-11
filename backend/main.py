@@ -7,15 +7,17 @@ import os
 from dotenv import load_dotenv
 from tools import TOOLS, TOOL_DESCRIPTIONS
 from agent import run_agent
+from context_engine import build_context, format_context_for_prompt
 from tools.file_tools import get_file_tree, get_file_content
 from tools.shell_tools import run_python_streaming
 from memory import memory_stats
 from evals.runner import run_single_eval, run_all_evals
 from evals.test_cases import TEST_CASES
 from rate_limiter import check_rate_limit, rate_limit_status
-# pyrefly: ignore [missing-import]
 from sse_starlette.sse import EventSourceResponse
 from agent_streaming import run_agent_streaming
+from checkpoints import list_checkpoints, load_checkpoint, delete_checkpoint
+from multi_agent import run_multi_agent
 
 load_dotenv()
 
@@ -62,6 +64,15 @@ class EvalRequest(BaseModel):
 class SingleEvalRequest(BaseModel):
     test_id: str
     user_id: str = "eval_user"
+
+class ResumeRequest(BaseModel):
+    checkpoint_id: str
+    user_id: str = "anonymous"
+    additional_steps: int = 20
+
+class MultiAgentRequest(BaseModel):
+    task: str
+    user_id: str = "anonymous"
 
 @app.get("/")
 def root():
@@ -111,6 +122,18 @@ def agent(req: AgentRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/agent/multi")
+async def multi_agent(req: MultiAgentRequest):
+    try:
+        check_rate_limit(req.user_id)
+        context = format_context_for_prompt(req.user_id)
+        result = await run_multi_agent(req.task, req.user_id, context)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/agent/stream")
 async def agent_stream(task: str, user_id: str = "anonymous", max_steps: int = 10):
     try:
@@ -123,6 +146,29 @@ async def agent_stream(task: str, user_id: str = "anonymous", max_steps: int = 1
             yield chunk
 
     return EventSourceResponse(event_generator())
+
+@app.get("/checkpoints/{user_id}")
+def get_checkpoints(user_id: str):
+    return {"checkpoints": list_checkpoints(user_id)}
+
+@app.post("/agent/resume")
+def resume_agent(req: ResumeRequest):
+    """Resume a paused agent task from a checkpoint."""
+    checkpoint = load_checkpoint(req.checkpoint_id)
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    try:
+        result = run_agent(
+            task=checkpoint["task"],
+            max_steps=req.additional_steps,
+            user_id=req.user_id,
+            checkpoint=checkpoint
+        )
+        if result.get("final_answer") and not result["final_answer"].startswith("ERROR"):
+            delete_checkpoint(req.checkpoint_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/explain")
 async def explain_code(req: ExplainRequest):
@@ -173,6 +219,10 @@ def workspace_file(filename: str, user_id: str = "anonymous"):
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("error"))
     return result
+
+@app.get("/workspace/context")
+def workspace_context(user_id: str = "anonymous"):
+    return build_context(user_id)
 
 @app.get("/memory/stats")
 def get_memory_stats(user_id: str = "anonymous"):

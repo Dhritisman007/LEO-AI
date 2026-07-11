@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Wrench, CheckCircle2, XCircle, Brain, Loader2, BookOpen, Copy, Check, Bot } from "lucide-react";
+import { Wrench, CheckCircle2, XCircle, Brain, Loader2, BookOpen, Copy, Check, Bot, RotateCcw } from "lucide-react";
 import { motion } from "framer-motion";
 import { Message } from "../types";
 import PlanTracker from "./PlanTracker";
@@ -76,9 +76,10 @@ type Props = {
   message: Message;
   allMessages: Message[];
   userId: string;
+  onResume?: (checkpointId: string) => void;
 };
 
-export default function ChatMessage({ message, allMessages, userId }: Props) {
+export default function ChatMessage({ message, allMessages, userId, onResume }: Props) {
   const [showExplain, setShowExplain] = useState(false);
   const [explaining, setExplaining] = useState(false);
   const [explanation, setExplanation] = useState("");
@@ -130,6 +131,12 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
+
+  // Detect if this is a paused task
+  const isPaused = message.content?.startsWith("PAUSED:");
+  const checkpointId = message.steps
+    ?.find(s => s.content?.includes("checkpoint saved:"))
+    ?.content?.split("checkpoint saved: ")[1]?.trim();
 
   if (message.role === "user") {
     return (
@@ -260,6 +267,33 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
               )}
             </button>
           </div>
+        )}
+
+        {/* Critique score badge */}
+        {message.critique && message.status === "done" && (
+          <div className={`mt-2 flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border w-fit ${
+            message.critique.score >= 8
+              ? "border-emerald-800 bg-emerald-950/30 text-emerald-400"
+              : message.critique.score >= 6
+              ? "border-yellow-800 bg-yellow-950/30 text-yellow-400"
+              : "border-red-800 bg-red-950/30 text-red-400"
+          }`}>
+            <span>Code quality: {message.critique.score}/10</span>
+            {message.critique.rewrite_needed && (
+              <span className="text-zinc-500">· auto-improved</span>
+            )}
+          </div>
+        )}
+
+        {/* Resume button for paused tasks */}
+        {isPaused && checkpointId && (
+          <button
+            onClick={() => onResume?.(checkpointId)}
+            className="mt-2 flex items-center gap-1.5 text-xs bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded-lg transition"
+          >
+            <RotateCcw size={12} />
+            Resume task (continue from step {message.steps?.length})
+          </button>
         )}
 
         {/* Explanation panel */}
