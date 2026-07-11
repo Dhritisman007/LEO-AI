@@ -1,43 +1,66 @@
 import google.generativeai as genai
 import json
 
-CRITIC_PROMPT = """You are a senior software engineer reviewing code written by an AI agent.
+PR_REVIEW_PROMPT = """You are a senior engineer doing a thorough PR review.
 
-Task the agent was given:
-{task}
+Task that was implemented: {task}
 
-Code the agent produced:
-{code}
+Files produced:
+{files}
 
 Execution output:
 {output}
 
-Review the code and respond with a JSON object ONLY — no other text:
+Do a PR review covering:
+1. CORRECTNESS — does it actually solve the task? does it handle edge cases?
+2. CODE QUALITY — readability, naming, structure, documentation
+3. ROBUSTNESS — error handling, input validation, resource cleanup
+4. COMPLETENESS — are all requirements met? anything missing?
+5. PRODUCTION READINESS — could this ship without embarrassment?
+
+Respond with JSON ONLY:
 {{
+  "approve": true/false,
   "score": 1-10,
-  "passed": true/false,
-  "issues": ["issue 1", "issue 2"],
-  "improvements": ["improvement 1", "improvement 2"],
+  "summary": "one sentence verdict",
+  "blocking_issues": ["critical issues that must be fixed before DONE"],
+  "suggestions": ["non-blocking improvements for next time"],
   "rewrite_needed": true/false,
-  "rewrite_reason": "reason if rewrite needed"
+  "what_was_done_well": ["things LEO got right"]
 }}
 
-Score 8+ = good code, no rewrite needed.
-Score below 6 = rewrite needed.
+Score guide:
+10 = would merge immediately, production ready
+8-9 = good code, minor suggestions only
+6-7 = works but needs improvement
+4-5 = significant issues, needs revision
+1-3 = fundamental problems, rewrite needed
 
-Focus on:
-- Correctness (does it actually solve the task?)
-- Code quality (readable, idiomatic, no obvious bugs)
-- Edge cases (does it handle empty input, errors?)
-- Efficiency (no obvious performance issues)
+Be a strict but fair reviewer. Don't approve mediocre code.
+"""
+
+REWRITE_PROMPT = """You are LEO, an expert software engineer.
+
+Your original implementation had these blocking issues:
+{issues}
+
+Original code:
+{original_code}
+
+Rewrite the code fixing ALL blocking issues.
+Apply these improvements too:
+{suggestions}
+
+Return ONLY the improved code — complete, no truncation, no markdown.
 """
 
 
-def critique_code(task: str, code: str, output: str) -> dict:
-    """
-    Have a critic LLM review LEO's code output.
-    Returns assessment with score and whether a rewrite is needed.
-    """
+def pr_review(
+    task: str,
+    files: list[dict],  # [{"filename": "x.py", "content": "..."}]
+    output: str
+) -> dict:
+    """Perform a PR-style review of LEO's output."""
     try:
         model = genai.GenerativeModel(
             "gemini-flash-lite-latest",
@@ -47,58 +70,58 @@ def critique_code(task: str, code: str, output: str) -> dict:
             }
         )
 
-        prompt = CRITIC_PROMPT.format(
-            task=task,
-            code=code[:3000],  # cap to avoid token overflow
-            output=output[:1000]
+        files_text = "\n\n".join(
+            f"### {f['filename']}\n```\n{f['content'][:2000]}\n```"
+            for f in files
         )
 
-        response = model.generate_content(prompt)
-        result = json.loads(response.text)
-        return result
+        response = model.generate_content(
+            PR_REVIEW_PROMPT.format(
+                task=task,
+                files=files_text,
+                output=output[:1000]
+            )
+        )
+
+        return json.loads(response.text)
 
     except Exception as e:
         return {
+            "approve": True,
             "score": 7,
-            "passed": True,
-            "issues": [],
-            "improvements": [],
+            "summary": f"Review failed: {str(e)}",
+            "blocking_issues": [],
+            "suggestions": [],
             "rewrite_needed": False,
-            "rewrite_reason": f"Critic failed: {str(e)}"
+            "what_was_done_well": []
         }
 
 
-REWRITE_PROMPT = """You are LEO, an expert coding agent. You previously wrote this code:
-
-{original_code}
-
-A code reviewer found these issues:
-{issues}
-
-And suggested these improvements:
-{improvements}
-
-Rewrite the code fixing ALL the issues and applying the improvements.
-Return ONLY the improved code — no explanation, no markdown, no backticks.
-"""
-
-
-def rewrite_code(original_code: str, issues: list, improvements: list) -> str:
-    """Ask LEO to rewrite code based on critic feedback."""
+def rewrite_code(
+    original_code: str,
+    blocking_issues: list[str],
+    suggestions: list[str]
+) -> str:
+    """Rewrite code based on PR review feedback."""
     try:
         model = genai.GenerativeModel(
-            "gemini-1.5-flash",
+            "gemini-flash-lite-latest",
             generation_config={"temperature": 0.2}
         )
 
-        prompt = REWRITE_PROMPT.format(
-            original_code=original_code,
-            issues="\n".join(f"- {i}" for i in issues),
-            improvements="\n".join(f"- {i}" for i in improvements)
+        response = model.generate_content(
+            REWRITE_PROMPT.format(
+                original_code=original_code[:4000],
+                issues="\n".join(f"- {i}" for i in blocking_issues),
+                suggestions="\n".join(f"- {s}" for s in suggestions[:5])
+            )
         )
 
-        response = model.generate_content(prompt)
-        return response.text.strip()
+        code = response.text.strip()
+        if code.startswith("```"):
+            lines = code.split("\n")
+            code = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+        return code
 
-    except Exception as e:
-        return original_code  # fallback to original if rewrite fails
+    except Exception:
+        return original_code
