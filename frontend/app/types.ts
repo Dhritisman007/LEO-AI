@@ -28,6 +28,19 @@ export type Message = {
     improvements: string[];
     rewrite_needed: boolean;
   };
+  review?: {
+    approve: boolean;
+    score: number;
+    summary: string;
+    blocking_issues: string[];
+    suggestions: string[];
+    rewrite_needed: boolean;
+    what_was_done_well: string[];
+  };
+  analysis?: {
+    issues: { tool: string; message: string }[];
+    clean: boolean;
+  };
   status: "pending" | "done" | "error";
   timestamp: number;
 };

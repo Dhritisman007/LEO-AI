@@ -284,19 +284,71 @@ export default function ChatMessage({ message, allMessages, userId, onResume }: 
           </div>
         )}
 
-        {/* Critique score badge */}
-        {message.critique && message.status === "done" && (
-          <div className={`mt-2 flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border w-fit ${
-            message.critique.score >= 8
-              ? "border-emerald-800 bg-emerald-950/30 text-emerald-400"
-              : message.critique.score >= 6
-              ? "border-yellow-800 bg-yellow-950/30 text-yellow-400"
-              : "border-red-800 bg-red-950/30 text-red-400"
-          }`}>
-            <span>Code quality: {message.critique.score}/10</span>
-            {message.critique.rewrite_needed && (
-              <span className="text-zinc-500">· auto-improved</span>
-            )}
+        {/* Critique / Review / Analysis Quality Panel */}
+        {message.review && message.status === "done" && (
+          <div className="mt-3 border border-zinc-700 rounded-xl overflow-hidden">
+            {/* Score header */}
+            <div className={`flex items-center justify-between px-4 py-2.5 ${
+              message.review.score >= 8 ? "bg-emerald-950/40 border-b border-emerald-800/50"
+              : message.review.score >= 6 ? "bg-yellow-950/40 border-b border-yellow-800/50"
+              : "bg-red-950/40 border-b border-red-800/50"
+            }`}>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">
+                  {message.review.approve ? "✅" : "❌"}
+                </span>
+                <span className="text-xs font-semibold text-zinc-300">
+                  PR Review — {message.review.score}/10
+                </span>
+              </div>
+              <span className={`text-xs ${
+                message.review.score >= 8 ? "text-emerald-400"
+                : message.review.score >= 6 ? "text-yellow-400"
+                : "text-red-400"
+              }`}>
+                {message.review.summary}
+              </span>
+            </div>
+
+            {/* Details */}
+            <div className="px-4 py-3 bg-zinc-900/30 space-y-2">
+              {message.review.what_was_done_well?.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Done well</p>
+                  {message.review.what_was_done_well.map((w, i) => (
+                    <p key={i} className="text-xs text-emerald-400">✓ {w}</p>
+                  ))}
+                </div>
+              )}
+              {message.review.blocking_issues?.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">
+                    Issues {message.review.rewrite_needed ? "(auto-fixed)" : ""}
+                  </p>
+                  {message.review.blocking_issues.map((issue, i) => (
+                    <p key={i} className="text-xs text-red-400">✗ {issue}</p>
+                  ))}
+                </div>
+              )}
+              {message.review.suggestions?.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Suggestions</p>
+                  {message.review.suggestions.map((s, i) => (
+                    <p key={i} className="text-xs text-zinc-400">→ {s}</p>
+                  ))}
+                </div>
+              )}
+              {message.analysis && !message.analysis.clean && (
+                <div>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">
+                    Linter ({message.analysis.issues.length} issues — auto-formatted)
+                  </p>
+                  {message.analysis.issues.slice(0, 3).map((issue, i) => (
+                    <p key={i} className="text-xs text-yellow-500">⚠ {issue.message}</p>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
