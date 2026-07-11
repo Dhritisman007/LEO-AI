@@ -1,6 +1,6 @@
 import os
 
-BASE_WORKSPACE_DIR = "/tmp/leo_workspace"
+BASE_WORKSPACE_DIR = "/Users/dhritismansarma/Desktop/LEO AI/leo/workspace"
 
 def get_workspace_dir(user_id: str = "anonymous") -> str:
     path = os.path.join(BASE_WORKSPACE_DIR, user_id)
