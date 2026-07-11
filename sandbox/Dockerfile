@@ -29,5 +29,7 @@ RUN apt-get update && apt-get install -y \
 
 # Python packages
 RUN pip3 install pytest black requests numpy pandas
+RUN pip3 install flake8 black pylint mypy pytest pytest-cov
+RUN npm install -g eslint typescript prettier
 
 CMD ["bash"]
