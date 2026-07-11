@@ -11,9 +11,11 @@ from memory import (
     remember_task, recall_similar_tasks
 )
 from context_engine import format_context_for_prompt
-from critic import critique_code, rewrite_code
 from checkpoints import save_checkpoint
-from style_guides import detect_language_from_task, get_style_guide
+from style_guides import get_style_guide, detect_language_from_task
+from test_generator import generate_tests, get_test_filename
+from static_analysis import run_analysis
+from critic import pr_review, rewrite_code
 
 def classify_failure(tool_name: str, error: str) -> str:
     """Classify a tool failure to decide how to handle retry."""
@@ -362,19 +364,21 @@ def run_agent(
             log(f"RECALLED MEMORIES:\n{memory_context}")
     
         system = SYSTEM_PROMPT.format(tool_descriptions=format_tool_descriptions())
-        lang = detect_language_from_task(task)
-        if lang:
-            guide = get_style_guide(lang)
-            if guide:
-                system += f"\n\n{guide}\n"
-        
         plan_text = "\n".join(f"{p['id']}. {p['description']}" for p in plan)
+        
+        # Detect language and inject style guide
+        detected_language = detect_language_from_task(task)
+        style_guide = get_style_guide(detected_language) if detected_language else ""
+        if style_guide:
+            log(f"STYLE GUIDE: Injecting {detected_language} quality standards")
     
         history = [
             f"SYSTEM: {system}",
             f"USER TASK: {task}",
-            f"{workspace_context}",  # NEW — LEO sees the whole workspace
+            f"{workspace_context}",
         ]
+        if style_guide:
+            history.append(f"LANGUAGE QUALITY STANDARDS:\n{style_guide}")  # NEW
         if memory_context:
             history.append(memory_context)
         history.append(
@@ -588,41 +592,78 @@ def run_agent(
     last_filename = None
     last_output = ""
 
-    for s in reversed(steps):
+    # Collect all files LEO wrote during this task
+    files_written = []
+    last_output = ""
+    last_language = detected_language or "python"
+
+    for s in steps:
         if s.get("type") == "tool_call":
-            if s.get("tool") == "run_code" and not last_output:
+            if s.get("tool") == "write_file":
+                params = s.get("params", {})
+                filename = params.get("filename", "")
+                content = params.get("content", "")
+                if filename and content:
+                    files_written.append({"filename": filename, "content": content})
+            if s.get("tool") == "run_code":
                 result = s.get("result", {})
                 last_output = result.get("stdout", "") + result.get("stderr", "")
-            if s.get("tool") in ("write_file", "run_code") and not last_code:
-                params = s.get("params", {})
-                if "code" in params:
-                    last_code = params["code"]
-                    last_filename = params.get("filename", "code")
-                elif "content" in params:
-                    last_code = params["content"]
-                    last_filename = params.get("filename", "code")
-            if last_code and last_output:
-                break
+                last_language = s.get("params", {}).get("language", last_language)
 
-    critique = None
-    if last_code and was_successful:
-        log("CRITIC: Reviewing LEO's output...")
-        critique = critique_code(task, last_code, last_output)
-        log(f"CRITIC RESULT: score={critique.get('score')} rewrite={critique.get('rewrite_needed')}")
+    # PR Review
+    review = None
+    if files_written and was_successful:
+        log("PR REVIEW: Reviewing all produced files...")
+        review = pr_review(task, files_written, last_output)
+        log(f"PR REVIEW: score={review.get('score')} approve={review.get('approve')} rewrite={review.get('rewrite_needed')}")
 
-        if critique.get("rewrite_needed") and critique.get("score", 10) < 6:
-            log("CRITIC: Rewriting code due to low score...")
-            improved_code = rewrite_code(
-                last_code,
-                critique.get("issues", []),
-                critique.get("improvements", [])
+        # Auto-rewrite if blocking issues found
+        if review.get("rewrite_needed") and review.get("blocking_issues"):
+            log(f"PR REVIEW: Rewriting due to {len(review['blocking_issues'])} blocking issues")
+            for file_info in files_written:
+                improved = rewrite_code(
+                    file_info["content"],
+                    review["blocking_issues"],
+                    review.get("suggestions", [])
+                )
+                if improved != file_info["content"]:
+                    from tools.file_tools import write_file
+                    write_file(file_info["filename"], improved, user_id)
+                    file_info["content"] = improved
+                    log(f"PR REVIEW: Rewrote {file_info['filename']}")
+
+        # Auto-generate tests if none exist
+        has_tests = any(
+            "test" in f["filename"].lower() or f["filename"].endswith("_test.py")
+            for f in files_written
+        )
+        if not has_tests and files_written and review.get("score", 0) >= 6:
+            log("TEST GEN: Generating tests automatically...")
+            main_file = files_written[0]
+            test_code = generate_tests(
+                main_file["content"],
+                last_language,
+                main_file["filename"]
             )
-            # Save the improved version
-            if last_filename and improved_code != last_code:
+            test_filename = get_test_filename(main_file["filename"], last_language)
+            from tools.file_tools import write_file
+            write_file(test_filename, test_code, user_id)
+            log(f"TEST GEN: Tests written to {test_filename}")
+            final_answer += f"\n\n(Auto-generated tests saved to {test_filename})"
+
+    # Static analysis
+    analysis = None
+    if files_written and detected_language:
+        main_file = files_written[0]
+        log(f"STATIC ANALYSIS: Running on {main_file['filename']}...")
+        analysis = run_analysis(main_file["content"], detected_language)
+        if not analysis["clean"]:
+            log(f"STATIC ANALYSIS: {len(analysis['issues'])} issues found")
+            # Use formatted version if available
+            if analysis.get("formatted_code") != main_file["content"]:
                 from tools.file_tools import write_file
-                write_file(last_filename, improved_code, user_id)
-                final_answer += f"\n\n(LEO self-improved this code — {len(critique.get('issues', []))} issue(s) fixed)"
-                log("CRITIC: Rewrite saved successfully")
+                write_file(main_file["filename"], analysis["formatted_code"], user_id)
+                log("STATIC ANALYSIS: Applied auto-formatting")
 
     return {
         "task": task,
@@ -632,5 +673,6 @@ def run_agent(
         "total_steps": len(steps),
         "scratchpad": scratchpad_read(user_id),
         "recalled_memories": past_memories,
-        "critique": critique,  # NEW
+        "review": review,        # NEW
+        "analysis": analysis,    # NEW
     }
