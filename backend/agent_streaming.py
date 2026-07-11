@@ -14,6 +14,7 @@ from agent import (
 from context_engine import format_context_for_prompt
 from checkpoints import save_checkpoint
 from critic import critique_code, rewrite_code
+from style_guides import detect_language_from_task, get_style_guide
 
 
 async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "anonymous"):
@@ -44,6 +45,12 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
             yield chunk
 
     system = SYSTEM_PROMPT.format(tool_descriptions=format_tool_descriptions())
+    lang = detect_language_from_task(task)
+    if lang:
+        guide = get_style_guide(lang)
+        if guide:
+            system += f"\n\n{guide}\n"
+
     plan_text = "\n".join(f"{p['id']}. {p['description']}" for p in plan)
     history = [
         f"SYSTEM: {system}",

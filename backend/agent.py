@@ -13,6 +13,7 @@ from memory import (
 from context_engine import format_context_for_prompt
 from critic import critique_code, rewrite_code
 from checkpoints import save_checkpoint
+from style_guides import detect_language_from_task, get_style_guide
 
 def classify_failure(tool_name: str, error: str) -> str:
     """Classify a tool failure to decide how to handle retry."""
@@ -361,6 +362,12 @@ def run_agent(
             log(f"RECALLED MEMORIES:\n{memory_context}")
     
         system = SYSTEM_PROMPT.format(tool_descriptions=format_tool_descriptions())
+        lang = detect_language_from_task(task)
+        if lang:
+            guide = get_style_guide(lang)
+            if guide:
+                system += f"\n\n{guide}\n"
+        
         plan_text = "\n".join(f"{p['id']}. {p['description']}" for p in plan)
     
         history = [
