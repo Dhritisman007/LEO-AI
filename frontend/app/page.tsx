@@ -1,5 +1,12 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
+import { useSession } from "next-auth/react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  TerminalSquare, FlaskConical, Sun, Moon,
+  Menu, X, Plus, Zap
+} from "lucide-react";
+
 import ChatMessage from "./components/ChatMessage";
 import ChatInput from "./components/ChatInput";
 import Sidebar from "./components/Sidebar";
@@ -9,55 +16,44 @@ import EvalDashboard from "./components/EvalDashboard";
 import TaskTemplates from "./components/TaskTemplates";
 import ConversationViewer from "./components/ConversationViewer";
 import LoginGate from "./components/LoginGate";
-import { useConversations } from "./hooks/useConversations";
-import { Message, Conversation } from "./types";
-import { useSession } from "next-auth/react";
-import { TerminalSquare, FlaskConical, Bot, Sun, Moon, Menu } from "lucide-react";
 import TypingIndicator from "./components/TypingIndicator";
+import { useConversations } from "./hooks/useConversations";
 import { useTheme } from "./hooks/useTheme";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import toast from "react-hot-toast";
+import { Message, Conversation } from "./types";
 
 export default function Home() {
   const { data: session } = useSession();
   const userId = (session?.user as any)?.id || "anonymous";
   const { theme, toggleTheme } = useTheme();
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const {
-    conversations,
-    activeConversationId,
-    loaded,
-    createConversation,
-    updateConversation,
-    updateMessage,
-    deleteConversation,
-    getActiveConversation,
-    switchConversation,
-    renameConversation,
+    conversations, activeConversationId, loaded,
+    createConversation, updateConversation, deleteConversation,
+    getActiveConversation, switchConversation, renameConversation,
   } = useConversations();
 
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [multiAgent, setMultiAgent] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showTerminal, setShowTerminal] = useState(false);
   const [showEvals, setShowEvals] = useState(false);
-  const [viewingConversation, setViewingConversation] = useState<Conversation | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [viewingConversation, setViewingConversation] = useState<Conversation | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const activeConversation = getActiveConversation();
   const messages = activeConversation?.messages || [];
 
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   useKeyboardShortcuts({
     onFocusInput: () => inputRef.current?.focus(),
-    onNewConversation: () => {
-      setViewingConversation(null);
-      createConversation();
-    },
+    onNewConversation: handleNewConversation,
     onOpenTerminal: () => setShowTerminal(true),
     onClosePanel: () => {
       setShowTerminal(false);
@@ -68,43 +64,31 @@ export default function Home() {
     onToggleTheme: toggleTheme,
   });
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  function setMessages(updater: (prev: Message[]) => Message[]) {
-    if (!activeConversationId) return;
-    const current = getActiveConversation()?.messages || [];
-    const next = updater(current);
-    updateConversation(activeConversationId, next);
+  function updateMsg(convoId: string, leoMsgId: string, updater: (m: Message) => Message) {
+    const convo = conversations.find((c) => c.id === convoId);
+    const msgs = convo?.messages || [];
+    updateConversation(convoId, msgs.map((m) => m.id === leoMsgId ? updater(m) : m));
   }
 
   function handleSelectConversation(id: string) {
     const convo = conversations.find((c) => c.id === id);
     if (!convo) return;
-
-    // If clicking the active conversation — open in viewer
     if (id === activeConversationId && convo.messages.length > 0) {
       setViewingConversation(convo);
       return;
     }
-
     switchConversation(id);
+    setSidebarOpen(false);
   }
 
   function handleNewConversation() {
     createConversation();
-  }
-
-  function handleResumeConversation(convo: Conversation) {
-    setViewingConversation(null);
-    switchConversation(convo.id);
+    setSidebarOpen(false);
   }
 
   async function handleSend() {
     if (!input.trim() || sending) return;
 
-    // If no active conversation, create one
     let convoId = activeConversationId;
     if (!convoId) {
       const newConvo = createConversation();
@@ -136,117 +120,57 @@ export default function Home() {
     setSending(true);
 
     try {
-      if (multiAgent) {
-        fetch("http://localhost:8000/agent/multi", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ task: userMsg.content, user_id: userId }),
-        })
-          .then((res) => res.json())
-          .then((data) => {
-            setSending(false);
-            setRefreshTrigger((n) => n + 1);
-            if (data.final_answer) {
-              updateMessage(convoId!, leoMsgId, (m) => ({
-                ...m,
-                content: data.final_answer,
-                steps: data.steps,
-                status: "done" as const,
-              }));
-              toast.success("LEO completed the task 🐐");
-            } else {
-              toast.error("LEO ran into an issue");
-              updateMessage(convoId!, leoMsgId, (m) => ({
-                ...m,
-                content: data.detail || "Error",
-                status: "error" as const,
-              }));
-            }
-          })
-          .catch((err) => {
-            setSending(false);
-            updateMessage(convoId!, leoMsgId, (m) => ({
-              ...m,
-              content: "Connection to LEO lost.",
-              status: "error" as const,
-            }));
-          });
-      } else {
-        const url = `http://localhost:8000/agent/stream?task=${encodeURIComponent(userMsg.content)}&user_id=${encodeURIComponent(userId)}&max_steps=10`;
-        const eventSource = new EventSource(url);
+      const url = `http://localhost:8000/agent/stream?task=${encodeURIComponent(userMsg.content)}&user_id=${encodeURIComponent(userId)}&max_steps=10`;
+      const eventSource = new EventSource(url);
 
-        eventSource.onmessage = (event) => {
+      eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
-
-        const updateMsg = (updater: (m: Message) => Message) => {
-          updateMessage(convoId!, leoMsgId, updater);
-        };
+        const id = convoId!;
 
         switch (data.type) {
           case "plan":
-            updateMsg((m) => ({ ...m, plan: data.plan }));
-            break;
-
           case "plan_update":
-            updateMsg((m) => ({ ...m, plan: data.plan }));
+            updateMsg(id, leoMsgId, (m) => ({ ...m, plan: data.plan }));
             break;
-
           case "tool_start":
-            updateMsg((m) => ({
+            updateMsg(id, leoMsgId, (m) => ({
               ...m,
-              steps: [
-                ...(m.steps || []),
-                {
-                  step: data.step,
-                  type: "tool_call" as const,
-                  tool: data.tool,
-                  params: data.params,
-                },
-              ],
+              steps: [...(m.steps || []), {
+                step: data.step, type: "tool_call" as const,
+                tool: data.tool, params: data.params,
+              }],
             }));
             break;
-
           case "tool_result":
-            updateMsg((m) => ({
+            updateMsg(id, leoMsgId, (m) => ({
               ...m,
               steps: (m.steps || []).map((s) =>
                 s.step === data.step ? { ...s, result: data.result } : s
               ),
             }));
             break;
-
-          case "thinking":
-            updateMsg((m) => ({
+          case "thought":
+            updateMsg(id, leoMsgId, (m) => ({
               ...m,
-              steps: [
-                ...(m.steps || []),
-                { step: data.step, type: "thought" as const, content: data.content },
-              ],
+              steps: [...(m.steps || []), {
+                step: data.step, type: "thought" as const, content: data.content
+              }],
             }));
             break;
-
           case "done":
             eventSource.close();
             setSending(false);
             setRefreshTrigger((n) => n + 1);
-            toast.success("LEO completed the task 🐐");
-            updateMsg((m) => ({
-              ...m,
-              content: data.content,
-              plan: data.plan,
-              critique: data.critique || null,
+            updateMsg(id, leoMsgId, (m) => ({
+              ...m, content: data.content, plan: data.plan,
               status: "done" as const,
             }));
             break;
-
           case "agent_error":
             eventSource.close();
             setSending(false);
-            toast.error("LEO ran into an issue");
-            updateMsg((m) => ({
-              ...m,
-              content: data.content,
-              plan: data.plan,
+            updateMsg(id, leoMsgId, (m) => ({
+              ...m, content: data.content, plan: data.plan,
               status: "error" as const,
             }));
             break;
@@ -256,194 +180,231 @@ export default function Home() {
       eventSource.onerror = () => {
         eventSource.close();
         setSending(false);
-        updateMessage(convoId!, leoMsgId, (m) => ({
-          ...m,
-          content: m.content || "Connection to LEO lost.",
-          status: "error" as const,
+        updateMsg(convoId!, leoMsgId, (m) => ({
+          ...m, content: "Connection to LEO lost.", status: "error" as const,
         }));
       };
-      }
     } catch {
       setSending(false);
     }
   }
 
-  async function handleResume(checkpointId: string) {
-    if (!activeConversationId) return;
-    setSending(true);
-
-    try {
-      const res = await fetch("http://localhost:8000/agent/resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ checkpoint_id: checkpointId, user_id: userId, additional_steps: 20 }),
-      });
-      const data = await res.json();
-      
-      if (res.ok) {
-        toast.success("Task resumed successfully");
-        const leoMsgId = Math.random().toString(36).substring(7);
-        const leoMsg: Message = {
-          id: leoMsgId,
-          role: "leo",
-          content: data.final_answer || "Task complete",
-          steps: data.steps,
-          plan: data.plan,
-          critique: data.critique || null,
-          status: (data.final_answer && data.final_answer.startsWith("ERROR")) ? "error" : "done",
-          timestamp: Date.now(),
-        };
-        const currentMessages = getActiveConversation()?.messages || [];
-        updateConversation(activeConversationId, [...currentMessages, leoMsg]);
-      } else {
-        toast.error("Failed to resume task: " + data.detail);
-      }
-    } catch (err) {
-      toast.error("Error connecting to server");
-    } finally {
-      setSending(false);
-      setRefreshTrigger(n => n + 1);
-    }
-  }
+  const hasOverlay = showTerminal || showEvals || !!selectedFile || !!viewingConversation;
 
   return (
     <LoginGate>
-      <main className="flex h-screen bg-zinc-950 text-white overflow-hidden">
-        {/* Sidebar — hidden on mobile, shown on desktop */}
-        <div className={`
-          fixed inset-y-0 left-0 z-30 w-56 flex-shrink-0 transform transition-transform duration-200
-          md:relative md:translate-x-0
-          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
-        `}>
+      <div className="leo-layout">
+        {/* ── Mobile sidebar backdrop ── */}
+        <AnimatePresence>
+          {sidebarOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="leo-backdrop"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* ── Sidebar ── */}
+        <aside className={`leo-sidebar ${sidebarOpen ? "leo-sidebar--open" : ""}`}>
           <Sidebar
             conversations={conversations}
             activeConversationId={activeConversationId}
-            onSelectConversation={(id) => {
-              handleSelectConversation(id);
-              setSidebarOpen(false);
-            }}
-            onNewConversation={() => {
-              handleNewConversation();
-              setSidebarOpen(false);
-            }}
+            onSelectConversation={handleSelectConversation}
+            onNewConversation={handleNewConversation}
             onDeleteConversation={deleteConversation}
             onRenameConversation={renameConversation}
             onFileSelect={setSelectedFile}
             refreshTrigger={refreshTrigger}
             userId={userId}
           />
-        </div>
+        </aside>
 
-        {/* Mobile overlay — tap to close sidebar */}
-        {sidebarOpen && (
-          <div
-            className="fixed inset-0 z-20 bg-black/50 md:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
-
-        {/* Main area */}
-        <div className="flex-1 flex flex-col relative min-w-0">
-          {/* Overlays */}
-          {selectedFile && (
-            <FilePreview filename={selectedFile} onClose={() => setSelectedFile(null)} />
-          )}
-          {showTerminal && <TerminalPanel onClose={() => setShowTerminal(false)} />}
-          {showEvals && <EvalDashboard onClose={() => setShowEvals(false)} />}
-          {viewingConversation && (
-            <ConversationViewer
-              conversation={viewingConversation}
-              userId={userId}
-              onClose={() => setViewingConversation(null)}
-              onResume={handleResumeConversation}
-            />
-          )}
-
+        {/* ── Main ── */}
+        <main className="leo-main">
           {/* Header */}
-          <div className="border-b border-zinc-800 px-4 md:px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <header className="leo-header">
+            <div className="leo-header__left">
               <button
+                className="leo-icon-btn leo-mobile-only"
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="md:hidden text-zinc-400 hover:text-white mr-2"
               >
-                <Menu size={20} />
+                {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
               </button>
-              <Bot size={24} className="text-zinc-300" />
-              <span className="font-bold text-lg">LEO</span>
-              <span className="text-zinc-500 text-sm ml-1 hidden sm:inline">— autonomous coding agent</span>
+              <div className="leo-logo">
+                <span className="leo-logo__icon"><Zap size={18} className="text-indigo-400" /></span>
+                <span className="leo-logo__name">LEO</span>
+                <span className="leo-logo__tag">beta</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={toggleTheme}
-                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5 transition"
-              >
-                {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-                {theme === "dark" ? "Light" : "Dark"}
-              </button>
+
+            <div className="leo-header__right">
               <button
                 onClick={() => setShowTerminal(true)}
-                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5 transition"
+                className="leo-header-btn"
               >
                 <TerminalSquare size={14} />
-                Terminal
+                <span>Terminal</span>
+                <kbd>⌘/</kbd>
               </button>
               <button
                 onClick={() => setShowEvals(true)}
-                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5 transition"
+                className="leo-header-btn"
               >
                 <FlaskConical size={14} />
-                Evals
+                <span>Evals</span>
               </button>
+              <div className="leo-header-divider" />
+              <button onClick={toggleTheme} className="leo-icon-btn">
+                {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+              {session?.user?.image && (
+                <img
+                  src={session.user.image}
+                  alt="avatar"
+                  className="leo-avatar"
+                />
+              )}
             </div>
-          </div>
+          </header>
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-6 py-6">
-            <div className="max-w-2xl mx-auto">
-              {!loaded ? null : messages.length === 0 ? (
-                <div className="text-center text-zinc-500 mt-20">
-                  <p className="text-lg">Give LEO a task to get started</p>
-                  <p className="text-sm mt-2 text-zinc-600">
-                    Try one of the templates below or type your own task
-                  </p>
-                </div>
-              ) : (
-                messages.map((m) => (
-                  <ChatMessage
-                    key={m.id}
-                    message={m}
-                    allMessages={messages}
-                    userId={userId}
-                    onResume={handleResume}
+          {/* Content area */}
+          <div className="leo-content">
+            {/* Overlays */}
+            <AnimatePresence>
+              {selectedFile && (
+                <motion.div
+                  key="file-preview"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="leo-overlay"
+                >
+                  <FilePreview
+                    filename={selectedFile}
+                    onClose={() => setSelectedFile(null)}
                   />
-                ))
+                </motion.div>
               )}
-              {sending && messages.length > 0 && 
-                messages[messages.length - 1].status === "pending" &&
-                messages[messages.length - 1].content === "" &&
-                (!messages[messages.length - 1].steps || messages[messages.length - 1].steps?.length === 0) && (
-                  <TypingIndicator />
+              {showTerminal && (
+                <motion.div
+                  key="terminal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="leo-overlay"
+                >
+                  <TerminalPanel onClose={() => setShowTerminal(false)} />
+                </motion.div>
               )}
-              <div ref={bottomRef} />
+              {showEvals && (
+                <motion.div
+                  key="evals"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="leo-overlay"
+                >
+                  <EvalDashboard onClose={() => setShowEvals(false)} />
+                </motion.div>
+              )}
+              {viewingConversation && (
+                <motion.div
+                  key="convo-viewer"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="leo-overlay"
+                >
+                  <ConversationViewer
+                    conversation={viewingConversation}
+                    onClose={() => setViewingConversation(null)}
+                    onResume={(c) => {
+                      setViewingConversation(null);
+                      switchConversation(c.id);
+                    }}
+                    userId={userId}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Messages */}
+            <div className="leo-messages">
+              <div className="leo-messages__inner">
+                {!loaded ? null : messages.length === 0 ? (
+                  <EmptyState onNewChat={handleNewConversation} />
+                ) : (
+                  <AnimatePresence initial={false}>
+                    {messages.map((m) => (
+                      <ChatMessage
+                        key={m.id}
+                        message={m}
+                        allMessages={messages}
+                        userId={userId}
+                      />
+                    ))}
+                  </AnimatePresence>
+                )}
+                {sending &&
+                  messages[messages.length - 1]?.status === "pending" &&
+                  !messages[messages.length - 1]?.content &&
+                  !messages[messages.length - 1]?.steps?.length && (
+                    <TypingIndicator />
+                  )}
+                <div ref={bottomRef} />
+              </div>
+            </div>
+
+            {/* Input area */}
+            <div className="leo-input-area">
+              <TaskTemplates
+                visible={messages.length === 0}
+                onSelect={(p) => setInput(p)}
+              />
+              <ChatInput
+                value={input}
+                onChange={setInput}
+                onSend={handleSend}
+                disabled={sending}
+                inputRef={inputRef}
+              />
             </div>
           </div>
-
-          {/* Templates + Input */}
-          <TaskTemplates
-            visible={messages.length === 0}
-            onSelect={(prompt) => setInput(prompt)}
-          />
-          <ChatInput
-            value={input}
-            onChange={setInput}
-            onSend={handleSend}
-            disabled={sending}
-            inputRef={inputRef}
-            multiAgent={multiAgent}
-            onToggleMultiAgent={() => setMultiAgent(!multiAgent)}
-          />
-        </div>
-      </main>
+        </main>
+      </div>
     </LoginGate>
+  );
+}
+
+function EmptyState({ onNewChat }: { onNewChat: () => void }) {
+  return (
+    <div className="leo-empty">
+      <div className="leo-empty__icon flex justify-center text-indigo-400">
+        <TerminalSquare size={48} strokeWidth={1.5} />
+      </div>
+      <h2 className="leo-empty__title">What are we building today?</h2>
+      <p className="leo-empty__subtitle">
+        LEO can write, run, debug, and deploy code in any language.
+        <br />
+        Just describe what you need.
+      </p>
+      <div className="leo-empty__actions">
+        <button onClick={onNewChat} className="leo-btn leo-btn--primary">
+          <Plus size={14} />
+          New task
+        </button>
+        <button className="leo-btn leo-btn--secondary">
+          <Zap size={14} />
+          See examples
+        </button>
+      </div>
+    </div>
   );
 }

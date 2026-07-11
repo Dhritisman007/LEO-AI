@@ -1,125 +1,128 @@
 "use client";
 import { useState } from "react";
-import { Wrench, CheckCircle2, XCircle, Brain, Loader2, BookOpen, Copy, Check, Bot, RotateCcw } from "lucide-react";
 import { motion } from "framer-motion";
+import {
+  Wrench, CheckCircle2, XCircle, Brain,
+  Loader2, BookOpen, Copy, Check, ChevronDown, ChevronUp
+} from "lucide-react";
 import { Message } from "../types";
 import PlanTracker from "./PlanTracker";
 import ExplainPanel from "./ExplainPanel";
 
-function formatTime(timestamp: number): string {
-  if (!timestamp) return "";
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function formatTime(ts: number) {
+  return new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 }
 
-function timeAgo(timestamp: number): string {
-  if (!timestamp) return "";
-  const diff = Date.now() - timestamp;
+function timeAgo(ts: number) {
+  const diff = Date.now() - ts;
   const mins = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  return `${Math.floor(mins / 60)}h ago`;
 }
 
-function stepIcon(type: string) {
-  if (type === "tool_call") return <Wrench size={14} />;
-  if (type === "done") return <CheckCircle2 size={14} />;
-  if (type === "error") return <XCircle size={14} />;
-  return <Brain size={14} />;
-}
-
-function stepColor(type: string) {
-  if (type === "tool_call") return "border-blue-700 bg-blue-950/50 text-blue-300";
-  if (type === "done") return "border-emerald-700 bg-emerald-950/50 text-emerald-300";
-  if (type === "error") return "border-red-700 bg-red-950/50 text-red-300";
-  return "border-zinc-700 bg-zinc-800/50 text-zinc-300";
-}
-
-function extractCodeFromMessage(message: Message): { code: string; filename: string } | null {
-  const codeSteps = message.steps?.filter(
-    (s) =>
-      s.type === "tool_call" &&
-      ((s.tool === "write_file" && s.params?.content) ||
-       (s.tool === "run_code" && s.params?.code))
+function extractCode(message: Message) {
+  const writeStep = message.steps?.find(
+    (s) => s.type === "tool_call" && s.tool === "write_file" && s.params?.content
   );
-
-  if (codeSteps && codeSteps.length > 0) {
-    const lastCode = codeSteps[codeSteps.length - 1];
-    return {
-      code: lastCode.params.content || lastCode.params.code,
-      filename: lastCode.params.filename || "snippet",
-    };
-  }
-  // Fallback — check if final answer contains a code block
-  if (message.content.includes("```")) {
-    const match = message.content.match(/```[\w]*\n([\s\S]*?)```/);
-    if (match) {
-      return { code: match[1], filename: "snippet" };
-    }
-  }
+  if (writeStep) return { code: writeStep.params.content, filename: writeStep.params.filename || "code" };
+  const match = message.content?.match(/```[\w]*\n([\s\S]*?)```/);
+  if (match) return { code: match[1], filename: "snippet" };
   return null;
 }
 
-function getUserTask(message: Message, allMessages: Message[]): string {
-  // Find the user message that preceded this LEO message
-  const idx = allMessages.findIndex((m) => m.id === message.id);
-  if (idx > 0) {
-    const prev = allMessages[idx - 1];
-    if (prev.role === "user") return prev.content;
-  }
-  return "";
+function StepCard({ step }: { step: any }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const configMap: Record<string, any> = {
+    tool_call: { color: "step-tool", icon: <Wrench size={12} />, label: `${step.tool}` },
+    done: { color: "step-done", icon: <CheckCircle2 size={12} />, label: "Complete" },
+    error: { color: "step-error", icon: <XCircle size={12} />, label: "Error" },
+    thought: { color: "step-thought", icon: <Brain size={12} />, label: "Thinking" },
+  };
+  const config = configMap[step.type] || { color: "step-thought", icon: <Brain size={12} />, label: "Step" };
+
+  const hasDetail = step.params || step.result || step.content;
+
+  return (
+    <div className={`step-card ${config.color}`}>
+      <button
+        className="step-card__header"
+        onClick={() => hasDetail && setExpanded(!expanded)}
+        style={{ cursor: hasDetail ? "pointer" : "default" }}
+      >
+        <span className="step-card__icon">{config.icon}</span>
+        <span className="step-card__label">{config.label}</span>
+        {step.result && (
+          <span className={`step-card__status ${step.result.success ? "success" : "fail"}`}>
+            {step.result.success ? "✓" : "✗"}
+          </span>
+        )}
+        {hasDetail && (
+          <span className="step-card__toggle">
+            {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+          </span>
+        )}
+      </button>
+      {expanded && hasDetail && (
+        <div className="step-card__detail">
+          {step.params && (
+            <pre className="step-card__code">
+              {JSON.stringify(step.params, null, 2)}
+            </pre>
+          )}
+          {step.result?.stdout && (
+            <pre className="step-card__output">{step.result.stdout}</pre>
+          )}
+          {step.result?.stderr && (
+            <pre className="step-card__output step-card__output--err">{step.result.stderr}</pre>
+          )}
+          {step.content && (
+            <p className="step-card__text">{step.content}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 type Props = {
   message: Message;
   allMessages: Message[];
   userId: string;
-  onResume?: (checkpointId: string) => void;
 };
 
-export default function ChatMessage({ message, allMessages, userId, onResume }: Props) {
+export default function ChatMessage({ message, allMessages, userId }: Props) {
   const [showExplain, setShowExplain] = useState(false);
   const [explaining, setExplaining] = useState(false);
   const [explanation, setExplanation] = useState("");
   const [copied, setCopied] = useState(false);
+  const [stepsExpanded, setStepsExpanded] = useState(false);
 
-  const codeInfo = message.role === "leo" ? extractCodeFromMessage(message) : null;
-  const hasCode = codeInfo !== null;
+  const codeInfo = message.role === "leo" ? extractCode(message) : null;
+  const hasCode = !!codeInfo;
+  const stepCount = message.steps?.length || 0;
+  const visibleSteps = stepsExpanded ? message.steps : message.steps?.slice(-3);
 
   async function handleExplain() {
     if (!codeInfo) return;
     setShowExplain(true);
     setExplaining(true);
     setExplanation("");
-
-    const task = getUserTask(message, allMessages);
-
+    const task = allMessages.find((_, i) => allMessages[i + 1]?.id === message.id)?.content || "";
     try {
       const res = await fetch("http://localhost:8000/explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: codeInfo.code,
-          filename: codeInfo.filename,
-          task,
-          user_id: userId,
-        }),
+        body: JSON.stringify({ code: codeInfo.code, filename: codeInfo.filename, task, user_id: userId }),
       });
-
-      if (!res.body) throw new Error("No response body");
+      if (!res.body) throw new Error();
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        setExplanation((prev) => prev + chunk);
+        setExplanation((prev) => prev + decoder.decode(value, { stream: true }));
       }
     } catch {
       setExplanation("Could not generate explanation.");
@@ -135,246 +138,133 @@ export default function ChatMessage({ message, allMessages, userId, onResume }: 
     setTimeout(() => setCopied(false), 2000);
   }
 
-  // Detect if this is a paused task
-  const isPaused = message.content?.startsWith("PAUSED:");
-  const checkpointId = message.steps
-    ?.find(s => s.content?.includes("checkpoint saved:"))
-    ?.content?.split("checkpoint saved: ")[1]?.trim();
-
   if (message.role === "user") {
     return (
       <motion.div
-        initial={{ opacity: 0, y: 10, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
-        className="flex justify-end mb-4 group"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        className="msg-user-wrap"
       >
-        <div className="flex flex-col items-end gap-1">
-          <div className="bg-white text-black rounded-2xl rounded-br-sm px-4 py-2.5 max-w-[80%] text-sm">
-            {message.content}
-          </div>
-          {message.timestamp && (
-            <span className="text-[10px] text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity">
-              {timeAgo(message.timestamp)} · {formatTime(message.timestamp)}
-            </span>
-          )}
-        </div>
+        <div className="msg-user">{message.content}</div>
+        <span className="msg-timestamp">{timeAgo(message.timestamp)}</span>
       </motion.div>
     );
   }
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: "easeOut" }}
-      className="flex justify-start mb-6 group"
+      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+      className="msg-leo-wrap"
     >
-      <div className="max-w-[85%] w-full">
-        <div className="flex items-center gap-2 mb-2">
-          <Bot size={18} className="text-zinc-300" />
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">LEO</span>
-          {message.status === "pending" && (
-            <Loader2 size={12} className="animate-spin text-zinc-500" />
+      {/* Avatar row */}
+      <div className="msg-leo__header">
+        <span className="msg-leo__avatar">🐐</span>
+        <span className="msg-leo__name">LEO</span>
+        {message.status === "pending" && (
+          <Loader2 size={12} className="msg-leo__spinner" />
+        )}
+        <span className="msg-timestamp ml-auto">{timeAgo(message.timestamp)}</span>
+      </div>
+
+      {/* Plan */}
+      {message.plan && message.plan.length > 0 && (
+        <PlanTracker plan={message.plan} />
+      )}
+
+      {/* Memory hint */}
+      {message.recalled_memories && message.recalled_memories.length > 0 && (
+        <div className="msg-memory-hint">
+          🧠 Using {message.recalled_memories.length} similar past task{message.recalled_memories.length > 1 ? "s" : ""} as context
+        </div>
+      )}
+
+      {/* Steps */}
+      {stepCount > 0 && (
+        <div className="msg-steps">
+          {stepCount > 3 && (
+            <button
+              className="msg-steps__toggle"
+              onClick={() => setStepsExpanded(!stepsExpanded)}
+            >
+              {stepsExpanded ? (
+                <><ChevronUp size={11} /> Hide steps</>
+              ) : (
+                <><ChevronDown size={11} /> {stepCount} steps — show all</>
+              )}
+            </button>
+          )}
+          <div className="msg-steps__list">
+            {visibleSteps?.map((s) => <StepCard key={s.step} step={s} />)}
+          </div>
+        </div>
+      )}
+
+      {/* Final reply */}
+      {message.content && (
+        <div className={`msg-bubble ${message.status === "error" ? "msg-bubble--error" : ""}`}>
+          {message.content}
+        </div>
+      )}
+
+      {/* PR Review */}
+      {message.review && message.status === "done" && (
+        <div className={`review-card ${
+          message.review.score >= 8 ? "review-card--good"
+          : message.review.score >= 6 ? "review-card--ok"
+          : "review-card--bad"
+        }`}>
+          <div className="review-card__header">
+            <span>{message.review.approve ? "✅" : "⚠️"}</span>
+            <span className="review-card__score">
+              Code review · {message.review.score}/10
+            </span>
+            <span className="review-card__summary">{message.review.summary}</span>
+          </div>
+          {(message.review.what_was_done_well?.length > 0 ||
+            message.review.blocking_issues?.length > 0) && (
+            <div className="review-card__body">
+              {message.review.what_was_done_well?.slice(0, 2).map((w, i) => (
+                <p key={i} className="review-good">✓ {w}</p>
+              ))}
+              {message.review.blocking_issues?.slice(0, 2).map((issue, i) => (
+                <p key={i} className="review-bad">
+                  ✗ {issue}
+                  {message.review?.rewrite_needed && " (auto-fixed)"}
+                </p>
+              ))}
+            </div>
           )}
         </div>
+      )}
 
-        {/* Plan tracker */}
-        {message.plan && <PlanTracker plan={message.plan} />}
-
-        {/* Memory hint */}
-        {message.recalled_memories && message.recalled_memories.length > 0 && (
-          <div className="text-[11px] text-zinc-500 mb-3 italic">
-            🧠 Recalled {message.recalled_memories.length} similar past task
-            {message.recalled_memories.length > 1 ? "s" : ""}
-          </div>
-        )}
-
-        {/* Step trace */}
-        {message.steps && message.steps.length > 0 && (
-          <div className="flex flex-col gap-2 mb-3">
-            {message.steps.map((s, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.15, delay: index * 0.05 }}
-                className={`border rounded-lg px-3 py-2 text-xs ${stepColor(s.type)}`}
-              >
-                <div className="flex items-center gap-2 font-medium">
-                  {stepIcon(s.type)}
-                  <span>
-                    {s.type === "tool_call"
-                      ? `Using ${s.tool}`
-                      : s.type === "done"
-                      ? "Task complete"
-                      : s.type === "error"
-                      ? "Stopped"
-                      : "Thinking"}
-                  </span>
-                </div>
-                {s.type === "tool_call" && s.params && (
-                  <pre className="mt-1 text-[11px] opacity-60 overflow-x-auto whitespace-pre-wrap">
-                    {JSON.stringify(s.params, null, 2)}
-                  </pre>
-                )}
-              </motion.div>
-            ))}
-          </div>
-        )}
-
-        {/* Final reply bubble */}
-        {message.content && (
-          <>
-            <div
-              className={`rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm whitespace-pre-wrap ${
-                message.status === "error"
-                  ? "bg-red-950/50 border border-red-800 text-red-200"
-                  : "bg-zinc-800 text-zinc-100"
-              }`}
-            >
-              {message.content}
-            </div>
-            {message.timestamp && (
-              <span className="text-[10px] text-zinc-600 ml-2 opacity-0 group-hover:opacity-100 transition-opacity mt-1 block">
-                {timeAgo(message.timestamp)} · {formatTime(message.timestamp)}
-              </span>
-            )}
-          </>
-        )}
-
-        {/* Render Code Block */}
-        {message.status === "done" && hasCode && codeInfo && (
-          <div className="mt-4 rounded-xl overflow-hidden border border-zinc-700 bg-[#1e1e1e]">
-            <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900/50">
-              <span className="text-xs font-mono text-zinc-400">{codeInfo.filename}</span>
-            </div>
-            <div className="p-4 overflow-x-auto text-xs font-mono text-zinc-300 whitespace-pre-wrap max-h-[400px] overflow-y-auto">
-              {codeInfo.code}
-            </div>
-          </div>
-        )}
-
-        {/* Action buttons — only show when LEO is done and has code */}
-        {message.status === "done" && hasCode && (
-          <div className="flex items-center gap-2 mt-2">
-            <button
-              onClick={handleExplain}
-              disabled={explaining}
-              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-blue-400 border border-zinc-700 hover:border-blue-700 rounded-lg px-3 py-1.5 transition"
-            >
-              {explaining ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                <BookOpen size={12} />
-              )}
-              {showExplain ? "Re-explain" : "Explain this code"}
-            </button>
-
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5 transition"
-            >
-              {copied ? (
-                <><Check size={12} className="text-emerald-400" /> Copied!</>
-              ) : (
-                <><Copy size={12} /> Copy code</>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* Critique / Review / Analysis Quality Panel */}
-        {message.review && message.status === "done" && (
-          <div className="mt-3 border border-zinc-700 rounded-xl overflow-hidden">
-            {/* Score header */}
-            <div className={`flex items-center justify-between px-4 py-2.5 ${
-              message.review.score >= 8 ? "bg-emerald-950/40 border-b border-emerald-800/50"
-              : message.review.score >= 6 ? "bg-yellow-950/40 border-b border-yellow-800/50"
-              : "bg-red-950/40 border-b border-red-800/50"
-            }`}>
-              <div className="flex items-center gap-2">
-                <span className="text-sm">
-                  {message.review.approve ? "✅" : "❌"}
-                </span>
-                <span className="text-xs font-semibold text-zinc-300">
-                  PR Review — {message.review.score}/10
-                </span>
-              </div>
-              <span className={`text-xs ${
-                message.review.score >= 8 ? "text-emerald-400"
-                : message.review.score >= 6 ? "text-yellow-400"
-                : "text-red-400"
-              }`}>
-                {message.review.summary}
-              </span>
-            </div>
-
-            {/* Details */}
-            <div className="px-4 py-3 bg-zinc-900/30 space-y-2">
-              {message.review.what_was_done_well?.length > 0 && (
-                <div>
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Done well</p>
-                  {message.review.what_was_done_well.map((w, i) => (
-                    <p key={i} className="text-xs text-emerald-400">✓ {w}</p>
-                  ))}
-                </div>
-              )}
-              {message.review.blocking_issues?.length > 0 && (
-                <div>
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">
-                    Issues {message.review.rewrite_needed ? "(auto-fixed)" : ""}
-                  </p>
-                  {message.review.blocking_issues.map((issue, i) => (
-                    <p key={i} className="text-xs text-red-400">✗ {issue}</p>
-                  ))}
-                </div>
-              )}
-              {message.review.suggestions?.length > 0 && (
-                <div>
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Suggestions</p>
-                  {message.review.suggestions.map((s, i) => (
-                    <p key={i} className="text-xs text-zinc-400">→ {s}</p>
-                  ))}
-                </div>
-              )}
-              {message.analysis && !message.analysis.clean && (
-                <div>
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">
-                    Linter ({message.analysis.issues.length} issues — auto-formatted)
-                  </p>
-                  {message.analysis.issues.slice(0, 3).map((issue, i) => (
-                    <p key={i} className="text-xs text-yellow-500">⚠ {issue.message}</p>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Resume button for paused tasks */}
-        {isPaused && checkpointId && (
+      {/* Actions */}
+      {message.status === "done" && hasCode && (
+        <div className="msg-actions">
           <button
-            onClick={() => onResume?.(checkpointId)}
-            className="mt-2 flex items-center gap-1.5 text-xs bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded-lg transition"
+            onClick={handleExplain}
+            disabled={explaining}
+            className="msg-action-btn"
           >
-            <RotateCcw size={12} />
-            Resume task (continue from step {message.steps?.length})
+            {explaining ? <Loader2 size={12} className="spin" /> : <BookOpen size={12} />}
+            {showExplain ? "Re-explain" : "Explain code"}
           </button>
-        )}
+          <button onClick={handleCopy} className="msg-action-btn">
+            {copied ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy</>}
+          </button>
+        </div>
+      )}
 
-        {/* Explanation panel */}
-        {showExplain && (
-          <ExplainPanel
-            explanation={explanation}
-            loading={explaining}
-            onClose={() => {
-              setShowExplain(false);
-              setExplanation("");
-            }}
-          />
-        )}
-      </div>
+      {/* Explanation */}
+      {showExplain && (
+        <ExplainPanel
+          explanation={explanation}
+          loading={explaining}
+          onClose={() => { setShowExplain(false); setExplanation(""); }}
+        />
+      )}
     </motion.div>
   );
 }

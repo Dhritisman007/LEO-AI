@@ -88,17 +88,21 @@ export default function Sidebar({
             {/* New chat button */}
             <button
               onClick={onNewConversation}
-              className="flex items-center gap-2 mx-3 my-2 px-3 py-2 text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg transition"
+              className="flex-shrink-0 flex items-center justify-between mx-3 mt-3 mb-2 px-3 py-2.5 text-sm font-medium text-zinc-200 transition"
+              style={{ backgroundColor: "#27272a", borderRadius: "8px", padding: "12px 16px", marginBottom: "12px" }}
             >
-              <Plus size={13} />
-              New chat
+              <div className="flex items-center gap-3">
+                <Plus size={16} />
+                <span style={{ fontSize: "14px" }}>New chat</span>
+              </div>
             </button>
 
             {/* Search box */}
-            <div className="relative mx-3 mb-2">
-              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
+            <div className="flex-shrink-0 relative mx-3 mb-2" style={{ marginBottom: "12px" }}>
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" style={{ left: "12px" }} />
               <input
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-7 pr-7 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+                className="w-full bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition"
+                style={{ borderRadius: "8px", padding: "12px 16px 12px 36px", fontSize: "14px" }}
                 placeholder="Search chats..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
