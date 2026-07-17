@@ -1,5 +1,5 @@
 "use client";
-import { Send, Mic, MicOff, Loader2 } from "lucide-react";
+import { Send, Mic, MicOff, Loader2, Users } from "lucide-react";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 
 type Props = {
@@ -8,9 +8,11 @@ type Props = {
   onSend: () => void;
   disabled: boolean;
   inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+  isMultiAgent: boolean;
+  onToggleMultiAgent: () => void;
 };
 
-export default function ChatInput({ value, onChange, onSend, disabled, inputRef }: Props) {
+export default function ChatInput({ value, onChange, onSend, disabled, inputRef, isMultiAgent, onToggleMultiAgent }: Props) {
   const { listening, startListening, stopListening } = useVoiceInput((t) =>
     onChange(value ? value + " " + t : t)
   );
@@ -39,6 +41,13 @@ export default function ChatInput({ value, onChange, onSend, disabled, inputRef 
             title="Voice input"
           >
             {listening ? <MicOff size={15} /> : <Mic size={15} />}
+          </button>
+          <button
+            onClick={onToggleMultiAgent}
+            className={`chat-input-mic ${isMultiAgent ? "chat-input-mic--active" : "text-gray-400"}`}
+            title="Toggle Multi-Agent Mode"
+          >
+            <Users size={15} />
           </button>
           <button
             onClick={onSend}

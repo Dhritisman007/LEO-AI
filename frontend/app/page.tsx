@@ -35,6 +35,7 @@ export default function Home() {
   } = useConversations();
 
   const [input, setInput] = useState("");
+  const [isMultiAgent, setIsMultiAgent] = useState(false);
   const [sending, setSending] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -120,6 +121,25 @@ export default function Home() {
     setSending(true);
 
     try {
+      if (isMultiAgent) {
+        const res = await fetch("http://localhost:8000/agent/multi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task: userMsg.content, user_id: userId }),
+        });
+        const data = await res.json();
+        
+        setSending(false);
+        setRefreshTrigger((n) => n + 1);
+        updateMsg(convoId!, leoMsgId, (m) => ({
+          ...m, 
+          content: data.final_answer || "Multi-agent task complete.", 
+          steps: data.steps || [],
+          status: "done" as const,
+        }));
+        return;
+      }
+
       const url = `http://localhost:8000/agent/stream?task=${encodeURIComponent(userMsg.content)}&user_id=${encodeURIComponent(userId)}&max_steps=10`;
       const eventSource = new EventSource(url);
 
@@ -374,6 +394,8 @@ export default function Home() {
                 onSend={handleSend}
                 disabled={sending}
                 inputRef={inputRef}
+                isMultiAgent={isMultiAgent}
+                onToggleMultiAgent={() => setIsMultiAgent(!isMultiAgent)}
               />
             </div>
           </div>
