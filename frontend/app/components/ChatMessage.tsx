@@ -97,7 +97,7 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
   const [explaining, setExplaining] = useState(false);
   const [explanation, setExplanation] = useState("");
   const [copied, setCopied] = useState(false);
-  const [stepsExpanded, setStepsExpanded] = useState(false);
+  const [stepsExpanded, setStepsExpanded] = useState(true);
 
   const codeInfo = message.role === "leo" ? extractCode(message) : null;
   const hasCode = !!codeInfo;
@@ -211,11 +211,10 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
 
       {/* PR Review */}
       {message.review && message.status === "done" && (
-        <div className={`review-card ${
-          message.review.score >= 8 ? "review-card--good"
-          : message.review.score >= 6 ? "review-card--ok"
-          : "review-card--bad"
-        }`}>
+        <div className={`review-card ${message.review.score >= 8 ? "review-card--good"
+            : message.review.score >= 6 ? "review-card--ok"
+              : "review-card--bad"
+          }`}>
           <div className="review-card__header">
             <span>{message.review.approve ? "✅" : "⚠️"}</span>
             <span className="review-card__score">
@@ -225,18 +224,18 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
           </div>
           {(message.review.what_was_done_well?.length > 0 ||
             message.review.blocking_issues?.length > 0) && (
-            <div className="review-card__body">
-              {message.review.what_was_done_well?.slice(0, 2).map((w, i) => (
-                <p key={i} className="review-good">✓ {w}</p>
-              ))}
-              {message.review.blocking_issues?.slice(0, 2).map((issue, i) => (
-                <p key={i} className="review-bad">
-                  ✗ {issue}
-                  {message.review?.rewrite_needed && " (auto-fixed)"}
-                </p>
-              ))}
-            </div>
-          )}
+              <div className="review-card__body">
+                {message.review.what_was_done_well?.slice(0, 2).map((w, i) => (
+                  <p key={i} className="review-good">✓ {w}</p>
+                ))}
+                {message.review.blocking_issues?.slice(0, 2).map((issue, i) => (
+                  <p key={i} className="review-bad">
+                    ✗ {issue}
+                    {message.review?.rewrite_needed && " (auto-fixed)"}
+                  </p>
+                ))}
+              </div>
+            )}
         </div>
       )}
 

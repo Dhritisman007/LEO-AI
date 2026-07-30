@@ -496,6 +496,7 @@ def run_agent(
                         "list_files",
                         "get_file_tree",
                         "get_file_content",
+                        "run_code",
                     ]
                     if tool_name in USER_SCOPED_TOOLS:
                         params["user_id"] = user_id

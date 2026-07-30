@@ -124,7 +124,7 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
             critique = None
             if last_code:
                 log("CRITIC: Reviewing LEO's output...")
-                critique = critique_code(task, last_code, last_output)
+                critique = pr_review(task, [{"filename": last_filename or "code", "content": last_code}], last_output)
                 log(f"CRITIC RESULT: score={critique.get('score')} rewrite={critique.get('rewrite_needed')}")
 
                 if critique.get("rewrite_needed") and critique.get("score", 10) < 6:
@@ -218,6 +218,7 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
                         "list_files",
                         "get_file_tree",
                         "get_file_content",
+                        "run_code",
                     ]
                     if tool_name in USER_SCOPED_TOOLS:
                         params["user_id"] = user_id

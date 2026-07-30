@@ -30,7 +30,7 @@ export default function Home() {
 
   const {
     conversations, activeConversationId, loaded,
-    createConversation, updateConversation, deleteConversation,
+    createConversation, updateConversation, updateMessage, deleteConversation,
     getActiveConversation, switchConversation, renameConversation,
   } = useConversations();
 
@@ -66,9 +66,7 @@ export default function Home() {
   });
 
   function updateMsg(convoId: string, leoMsgId: string, updater: (m: Message) => Message) {
-    const convo = conversations.find((c) => c.id === convoId);
-    const msgs = convo?.messages || [];
-    updateConversation(convoId, msgs.map((m) => m.id === leoMsgId ? updater(m) : m));
+    updateMessage(convoId, leoMsgId, updater);
   }
 
   function handleSelectConversation(id: string) {
@@ -182,7 +180,7 @@ export default function Home() {
             setSending(false);
             setRefreshTrigger((n) => n + 1);
             updateMsg(id, leoMsgId, (m) => ({
-              ...m, content: data.content, plan: data.plan,
+              ...m, content: data.content, plan: data.plan || m.plan,
               status: "done" as const,
             }));
             break;
@@ -190,7 +188,7 @@ export default function Home() {
             eventSource.close();
             setSending(false);
             updateMsg(id, leoMsgId, (m) => ({
-              ...m, content: data.content, plan: data.plan,
+              ...m, content: data.content, plan: data.plan || m.plan,
               status: "error" as const,
             }));
             break;
