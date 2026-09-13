@@ -277,7 +277,9 @@ def generate_plan(task: str) -> list:
         "what is", "what are", "who is", "who are",
         "where is", "when is", "why is", "how does",
         "explain", "define", "tell me", "can you explain",
-        "what does", "difference between", "meaning of"
+        "what does", "difference between", "meaning of",
+        "hey", "hello", "hi ", "sup", "yo ", "hiya",
+        "thanks", "thank you", "ok", "okay", "cool", "great",
     ]
     is_simple_question = any(task_lower.startswith(sig) for sig in question_signals) or (
         task_lower.endswith("?") and len(task.split()) < 12

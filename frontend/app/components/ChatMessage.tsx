@@ -3,7 +3,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Wrench, CheckCircle2, XCircle, Brain,
-  Loader2, BookOpen, Copy, Check, ChevronDown, ChevronUp
+  Loader2, BookOpen, Copy, Check, ChevronDown, ChevronUp, Zap
 } from "lucide-react";
 import { Message } from "../types";
 import PlanTracker from "./PlanTracker";
@@ -161,7 +161,7 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
     >
       {/* Avatar row */}
       <div className="msg-leo__header">
-        <span className="msg-leo__avatar">🐐</span>
+        <span className="msg-leo__avatar"><Zap size={16} className="text-indigo-400" fill="currentColor" /></span>
         <span className="msg-leo__name">LEO</span>
         {message.status === "pending" && (
           <Loader2 size={12} className="msg-leo__spinner" />
@@ -169,10 +169,10 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
         <span className="msg-timestamp ml-auto">{timeAgo(message.timestamp)}</span>
       </div>
 
-      {/* Plan */}
-      {message.plan && message.plan.length > 0 && (
+      {/* Plan tracker hidden — LEO uses it internally but we don't show it */}
+      {/* {message.plan && message.plan.length > 0 && (
         <PlanTracker plan={message.plan} />
-      )}
+      )} */}
 
       {/* Memory hint */}
       {message.recalled_memories && message.recalled_memories.length > 0 && (
