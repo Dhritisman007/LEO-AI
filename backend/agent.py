@@ -139,11 +139,22 @@ COMMON MISTAKES TO AVOID:
 - Don't call run_code on code you haven't written yet
 
 ═══════════════════════════════════════
-TWO MODES
+THREE MODES
 ═══════════════════════════════════════
 
 MODE 1 — DIRECT ANSWER
-Simple factual questions → answer directly, start with DONE:
+For simple factual questions you are confident about — definitions,
+explanations, stable facts — just answer directly with DONE:
+
+MODE 1B — WEB SEARCH REQUIRED
+For ANY question involving:
+- Current events, news, sports results, scores
+- Anything that happened after 2024
+- Stock prices, weather, live data
+- "Who won", "Who is currently", "What is the latest"
+- Anything with a year of 2025 or later in the question
+→ ALWAYS use web_search tool first, then answer with DONE:
+→ NEVER guess or answer from training data for these topics
 
 MODE 2 — AGENT (use tools)
 Tasks needing code/files/execution → use tools one at a time
@@ -163,6 +174,19 @@ Rules:
 8. For git tasks: branch → commit → push → PR in that order
 9. Run code after writing to verify it actually works
 10. If code fails — READ the error, understand it, fix it properly
+11. Never inject user_id into run_shell, run_code, web_search, or git_* calls
+12. If a question involves recent events, sports results, or anything 
+    time-sensitive — use web_search FIRST before answering. 
+    Never say "has not happened yet" for future events without searching first.
+
+Example (current events):
+User: Who won the FIFA World Cup 2026?
+LEO: I'll search for the latest result.
+TOOL: web_search
+PARAMS: {{"query": "FIFA World Cup 2026 winner"}}
+
+(After getting results:)
+DONE: Based on current information, [answer from search results]
 """
 
 def format_tool_descriptions() -> str:
@@ -269,10 +293,25 @@ def check_completion(text: str):
 def generate_plan(task: str) -> list:
     """
     For simple questions, skip planning entirely.
+    For time-sensitive questions, skip plan but let agent loop run (it will web_search).
     For real tasks, generate a step-by-step plan.
     """
-    # Quick classifier — if it looks like a question, skip planning
     task_lower = task.strip().lower()
+
+    # Time-sensitive signals — ALWAYS need web search, never skip to direct answer
+    time_sensitive = [
+        "who won", "who is winning", "latest", "current",
+        "2025", "2026", "2027", "today", "this week",
+        "this year", "right now", "score", "standings",
+        "champion", "winner", "election", "president",
+        "prime minister", "ceo of", "stock price",
+    ]
+
+    # If time-sensitive — let the agent loop run (it will web_search)
+    if any(sig in task_lower for sig in time_sensitive):
+        return []  # No plan, but agent loop runs and will search
+
+    # Simple questions that don't need searching or planning
     question_signals = [
         "what is", "what are", "who is", "who are",
         "where is", "when is", "why is", "how does",
@@ -281,11 +320,13 @@ def generate_plan(task: str) -> list:
         "hey", "hello", "hi ", "sup", "yo ", "hiya",
         "thanks", "thank you", "ok", "okay", "cool", "great",
     ]
-    is_simple_question = any(task_lower.startswith(sig) for sig in question_signals) or (
-        task_lower.endswith("?") and len(task.split()) < 12
+
+    is_simple = any(task_lower.startswith(sig) for sig in question_signals) or (
+        task_lower.endswith("?") and len(task.split()) < 8
+        and not any(sig in task_lower for sig in time_sensitive)
     )
 
-    if is_simple_question:
+    if is_simple:
         return []  # No plan needed — LEO will answer directly
 
     planning_prompt = f"""You are LEO, an AI coding agent. Before doing anything, break this task into a short numbered plan.

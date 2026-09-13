@@ -1,5 +1,2 @@
-import scraper
-try:
-    print('Imported successfully')
-except Exception as e:
-    print(f'Error occurred: {e}')
+import datetime
+print(datetime.date.today().strftime('%A, %B %d, %Y'))

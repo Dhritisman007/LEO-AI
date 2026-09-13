@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Wrench, CheckCircle2, XCircle, Brain,
   Loader2, BookOpen, Copy, Check, ChevronDown, ChevronUp, Zap
@@ -97,7 +97,7 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
   const [explaining, setExplaining] = useState(false);
   const [explanation, setExplanation] = useState("");
   const [copied, setCopied] = useState(false);
-  const [stepsExpanded, setStepsExpanded] = useState(true);
+  const [stepsExpanded, setStepsExpanded] = useState(false);
 
   const codeInfo = message.role === "leo" ? extractCode(message) : null;
   const hasCode = !!codeInfo;
@@ -184,21 +184,56 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
       {/* Steps */}
       {stepCount > 0 && (
         <div className="msg-steps">
-          {stepCount > 3 && (
-            <button
-              className="msg-steps__toggle"
-              onClick={() => setStepsExpanded(!stepsExpanded)}
-            >
-              {stepsExpanded ? (
-                <><ChevronUp size={11} /> Hide steps</>
-              ) : (
-                <><ChevronDown size={11} /> {stepCount} steps — show all</>
-              )}
-            </button>
-          )}
-          <div className="msg-steps__list">
-            {visibleSteps?.map((s) => <StepCard key={s.step} step={s} />)}
-          </div>
+          <button
+            className="msg-steps__toggle"
+            onClick={() => setStepsExpanded(!stepsExpanded)}
+          >
+            <div className="msg-steps__toggle-left">
+              {stepsExpanded
+                ? <ChevronUp size={11} />
+                : <ChevronDown size={11} />
+              }
+              <span>
+                {stepsExpanded ? "Hide" : "Show"} thinking
+                <span className="msg-steps__badge">{stepCount} steps</span>
+              </span>
+            </div>
+
+            {/* Step type summary pills */}
+            {!stepsExpanded && (
+              <div className="msg-steps__pills">
+                {(message.steps?.filter(s => s.type === "tool_call").length ?? 0) > 0 && (
+                  <span className="msg-steps__pill msg-steps__pill--tool">
+                    {message.steps?.filter(s => s.type === "tool_call").length} tools
+                  </span>
+                )}
+                {message.steps?.some(s => s.type === "done") && (
+                  <span className="msg-steps__pill msg-steps__pill--done">done</span>
+                )}
+                {message.steps?.some(s => s.type === "error") && (
+                  <span className="msg-steps__pill msg-steps__pill--error">error</span>
+                )}
+              </div>
+            )}
+          </button>
+
+          <AnimatePresence>
+            {stepsExpanded && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                style={{ overflow: "hidden" }}
+              >
+                <div className="msg-steps__list">
+                  {message.steps?.map((s) => (
+                    <StepCard key={s.step} step={s} />
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 

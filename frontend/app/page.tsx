@@ -16,7 +16,8 @@ import EvalDashboard from "./components/EvalDashboard";
 import TaskTemplates from "./components/TaskTemplates";
 import ConversationViewer from "./components/ConversationViewer";
 import LoginGate from "./components/LoginGate";
-import TypingIndicator from "./components/TypingIndicator";
+import StatusBar from "./components/StatusBar";
+import SkeletonMessage from "./components/SkeletonMessage";
 import { useConversations } from "./hooks/useConversations";
 import { useTheme } from "./hooks/useTheme";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -43,6 +44,10 @@ export default function Home() {
   const [showEvals, setShowEvals] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [viewingConversation, setViewingConversation] = useState<Conversation | null>(null);
+  const [status, setStatus] = useState<{
+    type: "idle" | "thinking" | "tool" | "done" | "error";
+    message: string;
+  }>({ type: "idle", message: "" });
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const activeConversation = getActiveConversation();
@@ -117,6 +122,7 @@ export default function Home() {
     updateConversation(convoId, [...currentMessages, userMsg, leoMsg]);
     setInput("");
     setSending(true);
+    setStatus({ type: "thinking", message: "LEO is thinking..." });
 
     try {
       if (isMultiAgent) {
@@ -129,6 +135,8 @@ export default function Home() {
         
         setSending(false);
         setRefreshTrigger((n) => n + 1);
+        setStatus({ type: "done", message: "Task completed successfully" });
+        setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
         updateMsg(convoId!, leoMsgId, (m) => ({
           ...m, 
           content: data.final_answer || "Multi-agent task complete.", 
@@ -150,7 +158,26 @@ export default function Home() {
           case "plan_update":
             updateMsg(id, leoMsgId, (m) => ({ ...m, plan: data.plan }));
             break;
-          case "tool_start":
+          case "thinking":
+            setStatus({ type: "thinking", message: "LEO is reasoning..." });
+            break;
+          case "tool_start": {
+            const toolMessages: Record<string, string> = {
+              write_file: `Writing ${data.params?.filename || "file"}...`,
+              read_file: `Reading ${data.params?.filename || "file"}...`,
+              run_code: `Running ${data.params?.language || "code"}...`,
+              run_shell: `Running command...`,
+              web_search: `Searching for "${data.params?.query?.slice(0, 30) || "..."}"`,
+              git_create_branch: `Creating branch ${data.params?.branch_name || ""}...`,
+              git_commit_changes: `Committing changes...`,
+              git_push_branch: `Pushing to GitHub...`,
+              git_open_pull_request: `Opening pull request...`,
+              list_files: `Listing workspace files...`,
+            };
+            setStatus({
+              type: "tool",
+              message: toolMessages[data.tool] || `Using ${data.tool}...`,
+            });
             updateMsg(id, leoMsgId, (m) => ({
               ...m,
               steps: [...(m.steps || []), {
@@ -159,6 +186,7 @@ export default function Home() {
               }],
             }));
             break;
+          }
           case "tool_result":
             updateMsg(id, leoMsgId, (m) => ({
               ...m,
@@ -168,6 +196,7 @@ export default function Home() {
             }));
             break;
           case "thought":
+            setStatus({ type: "thinking", message: "LEO is reasoning..." });
             updateMsg(id, leoMsgId, (m) => ({
               ...m,
               steps: [...(m.steps || []), {
@@ -179,6 +208,8 @@ export default function Home() {
             eventSource.close();
             setSending(false);
             setRefreshTrigger((n) => n + 1);
+            setStatus({ type: "done", message: "Task completed successfully" });
+            setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
             updateMsg(id, leoMsgId, (m) => ({
               ...m, content: data.content, plan: data.plan || m.plan,
               status: "done" as const,
@@ -187,6 +218,8 @@ export default function Home() {
           case "agent_error":
             eventSource.close();
             setSending(false);
+            setStatus({ type: "error", message: "LEO encountered an issue" });
+            setTimeout(() => setStatus({ type: "idle", message: "" }), 4000);
             updateMsg(id, leoMsgId, (m) => ({
               ...m, content: data.content, plan: data.plan || m.plan,
               status: "error" as const,
@@ -198,12 +231,16 @@ export default function Home() {
       eventSource.onerror = () => {
         eventSource.close();
         setSending(false);
+        setStatus({ type: "error", message: "Connection lost" });
+        setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
         updateMsg(convoId!, leoMsgId, (m) => ({
           ...m, content: "Connection to LEO lost.", status: "error" as const,
         }));
       };
     } catch {
       setSending(false);
+      setStatus({ type: "error", message: "Failed to connect" });
+      setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
     }
   }
 
@@ -287,6 +324,9 @@ export default function Home() {
               )}
             </div>
           </header>
+
+          {/* Status Bar */}
+          <StatusBar status={status} />
 
           {/* Content area */}
           <div className="leo-content">
@@ -374,7 +414,7 @@ export default function Home() {
                   messages[messages.length - 1]?.status === "pending" &&
                   !messages[messages.length - 1]?.content &&
                   !messages[messages.length - 1]?.steps?.length && (
-                    <TypingIndicator />
+                    <SkeletonMessage />
                   )}
                 <div ref={bottomRef} />
               </div>

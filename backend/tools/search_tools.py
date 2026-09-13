@@ -1,41 +1,29 @@
-import httpx
+from duckduckgo_search import DDGS
+
 
 def web_search(query: str) -> dict:
-    """Search the web using DuckDuckGo (free, no API key needed)."""
+    """Search the web using DuckDuckGo full text search."""
     try:
-        url = "https://api.duckduckgo.com/"
-        params = {
-            "q": query,
-            "format": "json",
-            "no_html": "1",
-            "skip_disambig": "1",
-        }
-        response = httpx.get(url, params=params, timeout=10)
-        data = response.json()
+        with DDGS() as ddgs:
+            raw_results = list(ddgs.text(query, max_results=5))
+
+        if not raw_results:
+            # Fallback: try a broader query
+            with DDGS() as ddgs:
+                raw_results = list(ddgs.text(query + " site:wikipedia.org OR site:espn.com OR site:bbc.com", max_results=5))
+
+        if not raw_results:
+            return {"success": False, "error": "No results found", "query": query}
 
         results = []
-
-        # Abstract (main answer)
-        if data.get("Abstract"):
+        for r in raw_results:
             results.append({
-                "title": data.get("Heading", ""),
-                "snippet": data.get("Abstract", ""),
-                "url": data.get("AbstractURL", ""),
+                "title": r.get("title", ""),
+                "snippet": r.get("body", ""),
+                "url": r.get("href", ""),
             })
-
-        # Related topics
-        for topic in data.get("RelatedTopics", [])[:4]:
-            if "Text" in topic:
-                results.append({
-                    "title": topic.get("Text", "")[:60],
-                    "snippet": topic.get("Text", ""),
-                    "url": topic.get("FirstURL", ""),
-                })
-
-        if not results:
-            return {"success": False, "error": "No results found", "query": query}
 
         return {"success": True, "query": query, "results": results}
 
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "query": query}
