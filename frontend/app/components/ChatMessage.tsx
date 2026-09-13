@@ -8,6 +8,7 @@ import {
 import { Message } from "../types";
 import PlanTracker from "./PlanTracker";
 import ExplainPanel from "./ExplainPanel";
+import MessageContent from "./MessageContent";
 
 function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -240,7 +241,24 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
       {/* Final reply */}
       {message.content && (
         <div className={`msg-bubble ${message.status === "error" ? "msg-bubble--error" : ""}`}>
-          {message.content}
+          {message.status === "error"
+            ? message.content
+            : <MessageContent content={message.content} />
+          }
+        </div>
+      )}
+
+      {/* Duration badge */}
+      {message.status === "done" && message.duration !== undefined && (
+        <div className="msg-duration">
+          <span className="msg-duration__dot" />
+          Completed in {message.duration < 60
+            ? `${message.duration}s`
+            : `${Math.floor(message.duration / 60)}m ${message.duration % 60}s`
+          }
+          {message.duration > 30 && (
+            <span className="msg-duration__note"> · complex task</span>
+          )}
         </div>
       )}
 

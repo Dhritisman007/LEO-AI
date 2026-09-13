@@ -43,6 +43,7 @@ export type Message = {
   };
   status: "pending" | "done" | "error";
   timestamp: number;
+  duration?: number;
 };
 
 // NEW

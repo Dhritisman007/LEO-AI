@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   TerminalSquare, FlaskConical, Sun, Moon,
-  Menu, X, Plus, Zap
+  Menu, X, Plus, Zap, Bug, Activity, Globe, Terminal
 } from "lucide-react";
 
 import ChatMessage from "./components/ChatMessage";
@@ -18,6 +18,7 @@ import ConversationViewer from "./components/ConversationViewer";
 import LoginGate from "./components/LoginGate";
 import StatusBar from "./components/StatusBar";
 import SkeletonMessage from "./components/SkeletonMessage";
+import TypingIndicator from "./components/TypingIndicator";
 import { useConversations } from "./hooks/useConversations";
 import { useTheme } from "./hooks/useTheme";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -28,6 +29,7 @@ export default function Home() {
   const userId = (session?.user as any)?.id || "anonymous";
   const { theme, toggleTheme } = useTheme();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const taskStartTime = useRef<number>(0);
 
   const {
     conversations, activeConversationId, loaded,
@@ -48,6 +50,8 @@ export default function Home() {
     type: "idle" | "thinking" | "tool" | "done" | "error";
     message: string;
   }>({ type: "idle", message: "" });
+  const [currentTool, setCurrentTool] = useState<string | undefined>(undefined);
+  const [currentToolMsg, setCurrentToolMsg] = useState<string | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const activeConversation = getActiveConversation();
@@ -92,6 +96,7 @@ export default function Home() {
 
   async function handleSend() {
     if (!input.trim() || sending) return;
+    taskStartTime.current = Date.now();
 
     let convoId = activeConversationId;
     if (!convoId) {
@@ -159,9 +164,24 @@ export default function Home() {
             updateMsg(id, leoMsgId, (m) => ({ ...m, plan: data.plan }));
             break;
           case "thinking":
+            setCurrentTool(undefined);
+            setCurrentToolMsg("Thinking...");
             setStatus({ type: "thinking", message: "LEO is reasoning..." });
             break;
           case "tool_start": {
+            setCurrentTool(data.tool);
+            const smartMessages: Record<string, string> = {
+              write_file: `Writing ${data.params?.filename || "file"}`,
+              read_file: `Reading ${data.params?.filename || "file"}`,
+              run_code: `Running ${data.params?.language || "code"}`,
+              web_search: `Searching for "${data.params?.query?.slice(0, 25) || "..."}..."`,
+              git_create_branch: `Creating branch ${data.params?.branch_name || ""}`,
+              git_commit_changes: "Committing changes",
+              git_push_branch: "Pushing to GitHub",
+              git_open_pull_request: "Opening pull request",
+            };
+            setCurrentToolMsg(smartMessages[data.tool] || `Using ${data.tool}`);
+
             const toolMessages: Record<string, string> = {
               write_file: `Writing ${data.params?.filename || "file"}...`,
               read_file: `Reading ${data.params?.filename || "file"}...`,
@@ -196,6 +216,8 @@ export default function Home() {
             }));
             break;
           case "thought":
+            setCurrentTool(undefined);
+            setCurrentToolMsg("Thinking...");
             setStatus({ type: "thinking", message: "LEO is reasoning..." });
             updateMsg(id, leoMsgId, (m) => ({
               ...m,
@@ -205,19 +227,26 @@ export default function Home() {
             }));
             break;
           case "done":
+            const durationMs = Date.now() - taskStartTime.current;
+            const durationSec = Math.round(durationMs / 1000);
             eventSource.close();
             setSending(false);
             setRefreshTrigger((n) => n + 1);
+            setCurrentTool(undefined);
+            setCurrentToolMsg(undefined);
             setStatus({ type: "done", message: "Task completed successfully" });
             setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
             updateMsg(id, leoMsgId, (m) => ({
               ...m, content: data.content, plan: data.plan || m.plan,
               status: "done" as const,
+              duration: durationSec,
             }));
             break;
           case "agent_error":
             eventSource.close();
             setSending(false);
+            setCurrentTool(undefined);
+            setCurrentToolMsg(undefined);
             setStatus({ type: "error", message: "LEO encountered an issue" });
             setTimeout(() => setStatus({ type: "idle", message: "" }), 4000);
             updateMsg(id, leoMsgId, (m) => ({
@@ -397,7 +426,7 @@ export default function Home() {
             <div className="leo-messages">
               <div className="leo-messages__inner">
                 {!loaded ? null : messages.length === 0 ? (
-                  <EmptyState onNewChat={handleNewConversation} />
+                  <EmptyState onSelect={(prompt) => { setInput(prompt); inputRef.current?.focus(); }} />
                 ) : (
                   <AnimatePresence initial={false}>
                     {messages.map((m) => (
@@ -414,7 +443,10 @@ export default function Home() {
                   messages[messages.length - 1]?.status === "pending" &&
                   !messages[messages.length - 1]?.content &&
                   !messages[messages.length - 1]?.steps?.length && (
-                    <SkeletonMessage />
+                    <TypingIndicator
+                      toolName={currentTool}
+                      message={currentToolMsg}
+                    />
                   )}
                 <div ref={bottomRef} />
               </div>
@@ -443,27 +475,88 @@ export default function Home() {
   );
 }
 
-function EmptyState({ onNewChat }: { onNewChat: () => void }) {
+const SUGGESTIONS = [
+  {
+    icon: <Terminal size={22} className="text-indigo-400" fill="currentColor" fillOpacity={0.2} />,
+    title: "Build a REST API",
+    description: "FastAPI or Express with routes, models, and error handling",
+    prompt: "Build a complete REST API with FastAPI including GET, POST, PUT and DELETE endpoints for a todo list. Add proper error handling and run it.",
+    color: "group-hover:border-indigo-500/40 group-hover:bg-indigo-500/5 hover:shadow-[0_0_24px_rgba(99,102,241,0.15)]",
+  },
+  {
+    icon: <FlaskConical size={22} className="text-green-400" fill="currentColor" fillOpacity={0.2} />,
+    title: "Write unit tests",
+    description: "Generate comprehensive tests with edge cases",
+    prompt: "Write a Python function that validates email addresses, then write comprehensive unit tests covering valid emails, invalid formats, edge cases, and boundary conditions. Run the tests.",
+    color: "group-hover:border-green-500/40 group-hover:bg-green-500/5 hover:shadow-[0_0_24px_rgba(34,197,94,0.15)]",
+  },
+  {
+    icon: <Bug size={22} className="text-amber-400" fill="currentColor" fillOpacity={0.2} />,
+    title: "Debug my code",
+    description: "Find bugs, fix them, and explain what went wrong",
+    prompt: "Write a Python binary search function with a subtle bug in it, then find the bug, explain why it's wrong, fix it, and run tests to verify the fix.",
+    color: "group-hover:border-amber-500/40 group-hover:bg-amber-500/5 hover:shadow-[0_0_24px_rgba(245,158,11,0.15)]",
+  },
+  {
+    icon: <Activity size={22} className="text-blue-400" fill="currentColor" fillOpacity={0.2} />,
+    title: "Data analysis",
+    description: "Process data, calculate stats, visualize results",
+    prompt: "Write a Python script that generates a dataset of 100 student grades, calculates mean, median, standard deviation, and grade distribution, then prints a formatted report.",
+    color: "group-hover:border-blue-500/40 group-hover:bg-blue-500/5 hover:shadow-[0_0_24px_rgba(59,130,246,0.15)]",
+  },
+  {
+    icon: <Globe size={22} className="text-pink-400" fill="currentColor" fillOpacity={0.2} />,
+    title: "Web scraper",
+    description: "Extract data from websites with Python",
+    prompt: "Write a Python web scraper using requests and BeautifulSoup that fetches the top stories from Hacker News and prints the title, score, and URL for each. Run it.",
+    color: "group-hover:border-pink-500/40 group-hover:bg-pink-500/5 hover:shadow-[0_0_24px_rgba(236,72,153,0.15)]",
+  },
+  {
+    icon: <Zap size={22} className="text-purple-400" fill="currentColor" fillOpacity={0.2} />,
+    title: "Explain a concept",
+    description: "Deep dive into any programming topic",
+    prompt: "Explain how async/await works in Python with practical examples showing the difference between synchronous and asynchronous execution. Show real code examples.",
+    color: "group-hover:border-purple-500/40 group-hover:bg-purple-500/5 hover:shadow-[0_0_24px_rgba(168,85,247,0.15)]",
+  },
+];
+
+function EmptyState({ onSelect }: { onSelect: (prompt: string) => void }) {
   return (
-    <div className="leo-empty">
-      <div className="leo-empty__icon flex justify-center text-indigo-400">
-        <TerminalSquare size={48} strokeWidth={1.5} />
+    <div className="flex flex-col items-center justify-center pt-24 pb-12 px-6 w-full max-w-4xl mx-auto">
+      <div className="text-center mb-14 relative">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-indigo-500/10 rounded-full blur-[60px] pointer-events-none" />
+        <div className="flex justify-center mb-6 relative">
+          <div className="w-14 h-14 rounded-2xl bg-[#111] border border-indigo-500/30 flex items-center justify-center shadow-[0_0_30px_rgba(99,102,241,0.15)] text-indigo-400">
+            <Zap size={28} fill="currentColor" />
+          </div>
+        </div>
+        <h1 className="text-[28px] font-bold tracking-tight text-[#ededee] mb-3 relative">
+          What are we building today?
+        </h1>
+        <p className="text-gray-400 text-[14px] max-w-md mx-auto leading-relaxed relative">
+          LEO is an autonomous AI developer. Describe your task in detail or select one of the templates below to get started.
+        </p>
       </div>
-      <h2 className="leo-empty__title">What are we building today?</h2>
-      <p className="leo-empty__subtitle">
-        LEO can write, run, debug, and deploy code in any language.
-        <br />
-        Just describe what you need.
-      </p>
-      <div className="leo-empty__actions">
-        <button onClick={onNewChat} className="leo-btn leo-btn--primary">
-          <Plus size={14} />
-          New task
-        </button>
-        <button className="leo-btn leo-btn--secondary">
-          <Zap size={14} />
-          See examples
-        </button>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
+        {SUGGESTIONS.map((s) => (
+          <button
+            key={s.title}
+            className={`group flex items-start gap-4 p-5 rounded-[18px] bg-[#0c0c0c] border border-[#222] transition-all duration-300 text-left hover:-translate-y-[2px] ${s.color}`}
+            onClick={() => onSelect(s.prompt)}
+          >
+            <div className="mt-[2px] flex-shrink-0 drop-shadow-md transition-transform duration-300 group-hover:scale-110 group-hover:drop-shadow-lg">
+              {s.icon}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold text-[13.5px] text-[#ededee] mb-1 tracking-tight transition-colors">{s.title}</h3>
+              <p className="text-[11.5px] text-[#777] leading-relaxed">{s.description}</p>
+            </div>
+            <div className="text-[#555] opacity-0 -translate-x-2 transition-all duration-300 group-hover:opacity-100 group-hover:translate-x-0 flex-shrink-0 self-center">
+              →
+            </div>
+          </button>
+        ))}
       </div>
     </div>
   );
