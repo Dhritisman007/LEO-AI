@@ -522,42 +522,46 @@ const SUGGESTIONS = [
 
 function EmptyState({ onSelect }: { onSelect: (prompt: string) => void }) {
   return (
-    <div className="flex flex-col items-center justify-center pt-24 pb-12 px-6 w-full max-w-4xl mx-auto">
-      <div className="text-center mb-14 relative">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-indigo-500/10 rounded-full blur-[60px] pointer-events-none" />
+    <div className="flex flex-col items-center justify-center pt-16 pb-12 px-6 w-full max-w-4xl mx-auto h-full">
+      <div className="text-center mb-14">
         <div className="flex justify-center mb-6 relative">
-          <div className="w-14 h-14 rounded-2xl bg-[#111] border border-indigo-500/30 flex items-center justify-center shadow-[0_0_30px_rgba(99,102,241,0.15)] text-indigo-400">
-            <Zap size={28} fill="currentColor" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-indigo-500/10 rounded-full blur-[50px] pointer-events-none" />
+          <div className="w-14 h-14 rounded-2xl bg-[#111] border border-[#222] flex items-center justify-center shadow-lg text-indigo-400 relative z-10">
+            <Zap size={26} fill="currentColor" />
           </div>
         </div>
-        <h1 className="text-[28px] font-bold tracking-tight text-[#ededee] mb-3 relative">
+        
+        <h1 className="text-[26px] font-bold tracking-tight text-[#ededee] mb-2">
           What are we building today?
         </h1>
-        <p className="text-gray-400 text-[14px] max-w-md mx-auto leading-relaxed relative">
-          LEO is an autonomous AI developer. Describe your task in detail or select one of the templates below to get started.
-        </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full mb-10">
         {SUGGESTIONS.map((s) => (
           <button
             key={s.title}
-            className={`group flex items-start gap-4 p-5 rounded-[18px] bg-[#0c0c0c] border border-[#222] transition-all duration-300 text-left hover:-translate-y-[2px] ${s.color}`}
+            className={`group flex items-center gap-4 p-5 rounded-[18px] bg-[#0c0c0c] border border-[#222] transition-all duration-200 text-left hover:bg-[#111] hover:border-[#333] ${s.color}`}
             onClick={() => onSelect(s.prompt)}
           >
-            <div className="mt-[2px] flex-shrink-0 drop-shadow-md transition-transform duration-300 group-hover:scale-110 group-hover:drop-shadow-lg">
+            <div className="flex-shrink-0 w-11 h-11 rounded-[10px] flex items-center justify-center bg-[#151515] border border-[#2a2a2a] group-hover:scale-105 transition-transform shadow-sm">
               {s.icon}
             </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-[13.5px] text-[#ededee] mb-1 tracking-tight transition-colors">{s.title}</h3>
-              <p className="text-[11.5px] text-[#777] leading-relaxed">{s.description}</p>
+            
+            <div className="flex-1 min-w-0 flex flex-col justify-center">
+              <h3 className="font-medium text-[14.5px] text-[#ededee] mb-1 truncate">{s.title}</h3>
+              <p className="text-[12.5px] text-[#777] truncate">{s.description}</p>
             </div>
-            <div className="text-[#555] opacity-0 -translate-x-2 transition-all duration-300 group-hover:opacity-100 group-hover:translate-x-0 flex-shrink-0 self-center">
+            
+            <div className="text-[#555] opacity-0 -translate-x-2 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0 pr-2 flex-shrink-0">
               →
             </div>
           </button>
         ))}
       </div>
+      
+      <p className="text-gray-400 text-[14px] max-w-md mx-auto text-center leading-relaxed">
+        LEO is an autonomous AI developer. Describe your task in detail or select one of the templates above.
+      </p>
     </div>
   );
 }
