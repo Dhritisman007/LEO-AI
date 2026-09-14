@@ -9,6 +9,7 @@ import {
 
 import ChatMessage from "./components/ChatMessage";
 import ChatInput from "./components/ChatInput";
+import { useFileAttachment } from "./hooks/useFileAttachment";
 import Sidebar from "./components/Sidebar";
 import FilePreview from "./components/FilePreview";
 import TerminalPanel from "./components/TerminalPanel";
@@ -36,6 +37,14 @@ export default function Home() {
     createConversation, updateConversation, updateMessage, deleteConversation,
     getActiveConversation, switchConversation, renameConversation,
   } = useConversations();
+
+  const {
+    attachments,
+    error: attachError,
+    addFiles,
+    removeAttachment,
+    clearAttachments,
+  } = useFileAttachment();
 
   const [input, setInput] = useState("");
   const [isMultiAgent, setIsMultiAgent] = useState(false);
@@ -95,7 +104,7 @@ export default function Home() {
   }
 
   async function handleSend() {
-    if (!input.trim() || sending) return;
+    if ((!input.trim() && attachments.length === 0) || sending) return;
     taskStartTime.current = Date.now();
 
     let convoId = activeConversationId;
@@ -110,6 +119,7 @@ export default function Home() {
       content: input,
       status: "done",
       timestamp: Date.now(),
+      attachments: attachments.map((a) => ({ name: a.name, type: a.type })),
     };
 
     const leoMsgId = crypto.randomUUID();
@@ -125,149 +135,182 @@ export default function Home() {
 
     const currentMessages = getActiveConversation()?.messages || [];
     updateConversation(convoId, [...currentMessages, userMsg, leoMsg]);
+    const taskText = input;
     setInput("");
     setSending(true);
     setStatus({ type: "thinking", message: "LEO is thinking..." });
 
     try {
-      if (isMultiAgent) {
-        const res = await fetch("http://localhost:8000/agent/multi", {
+      if (attachments.length > 0) {
+        // Use multipart form for file upload
+        const formData = new FormData();
+        formData.append("task", taskText || "Analyze this file and describe what it contains");
+        formData.append("user_id", userId);
+        formData.append("max_steps", "10");
+        formData.append("file", attachments[0].raw); // first file
+
+        const res = await fetch("http://localhost:8000/agent/with-file", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ task: userMsg.content, user_id: userId }),
+          body: formData,
         });
+
         const data = await res.json();
+        const durationSec = Math.round((Date.now() - taskStartTime.current) / 1000);
+
+        updateMsg(convoId, leoMsgId, (m) => ({
+          ...m,
+          content: data.final_answer || "No response.",
+          steps: data.steps || [],
+          plan: data.plan || [],
+          status: data.final_answer?.startsWith("ERROR") ? "error" as const : "done" as const,
+          duration: durationSec,
+        }));
         
+        clearAttachments();
         setSending(false);
         setRefreshTrigger((n) => n + 1);
-        setStatus({ type: "done", message: "Task completed successfully" });
-        setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
-        updateMsg(convoId!, leoMsgId, (m) => ({
-          ...m, 
-          content: data.final_answer || "Multi-agent task complete.", 
-          steps: data.steps || [],
-          status: "done" as const,
-        }));
-        return;
-      }
-
-      const url = `http://localhost:8000/agent/stream?task=${encodeURIComponent(userMsg.content)}&user_id=${encodeURIComponent(userId)}&max_steps=10`;
-      const eventSource = new EventSource(url);
-
-      eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        const id = convoId!;
-
-        switch (data.type) {
-          case "plan":
-          case "plan_update":
-            updateMsg(id, leoMsgId, (m) => ({ ...m, plan: data.plan }));
-            break;
-          case "thinking":
-            setCurrentTool(undefined);
-            setCurrentToolMsg("Thinking...");
-            setStatus({ type: "thinking", message: "LEO is reasoning..." });
-            break;
-          case "tool_start": {
-            setCurrentTool(data.tool);
-            const smartMessages: Record<string, string> = {
-              write_file: `Writing ${data.params?.filename || "file"}`,
-              read_file: `Reading ${data.params?.filename || "file"}`,
-              run_code: `Running ${data.params?.language || "code"}`,
-              web_search: `Searching for "${data.params?.query?.slice(0, 25) || "..."}..."`,
-              git_create_branch: `Creating branch ${data.params?.branch_name || ""}`,
-              git_commit_changes: "Committing changes",
-              git_push_branch: "Pushing to GitHub",
-              git_open_pull_request: "Opening pull request",
-            };
-            setCurrentToolMsg(smartMessages[data.tool] || `Using ${data.tool}`);
-
-            const toolMessages: Record<string, string> = {
-              write_file: `Writing ${data.params?.filename || "file"}...`,
-              read_file: `Reading ${data.params?.filename || "file"}...`,
-              run_code: `Running ${data.params?.language || "code"}...`,
-              run_shell: `Running command...`,
-              web_search: `Searching for "${data.params?.query?.slice(0, 30) || "..."}"`,
-              git_create_branch: `Creating branch ${data.params?.branch_name || ""}...`,
-              git_commit_changes: `Committing changes...`,
-              git_push_branch: `Pushing to GitHub...`,
-              git_open_pull_request: `Opening pull request...`,
-              list_files: `Listing workspace files...`,
-            };
-            setStatus({
-              type: "tool",
-              message: toolMessages[data.tool] || `Using ${data.tool}...`,
-            });
-            updateMsg(id, leoMsgId, (m) => ({
-              ...m,
-              steps: [...(m.steps || []), {
-                step: data.step, type: "tool_call" as const,
-                tool: data.tool, params: data.params,
-              }],
-            }));
-            break;
-          }
-          case "tool_result":
-            updateMsg(id, leoMsgId, (m) => ({
-              ...m,
-              steps: (m.steps || []).map((s) =>
-                s.step === data.step ? { ...s, result: data.result } : s
-              ),
-            }));
-            break;
-          case "thought":
-            setCurrentTool(undefined);
-            setCurrentToolMsg("Thinking...");
-            setStatus({ type: "thinking", message: "LEO is reasoning..." });
-            updateMsg(id, leoMsgId, (m) => ({
-              ...m,
-              steps: [...(m.steps || []), {
-                step: data.step, type: "thought" as const, content: data.content
-              }],
-            }));
-            break;
-          case "done":
-            const durationMs = Date.now() - taskStartTime.current;
-            const durationSec = Math.round(durationMs / 1000);
-            eventSource.close();
-            setSending(false);
-            setRefreshTrigger((n) => n + 1);
-            setCurrentTool(undefined);
-            setCurrentToolMsg(undefined);
-            setStatus({ type: "done", message: "Task completed successfully" });
-            setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
-            updateMsg(id, leoMsgId, (m) => ({
-              ...m, content: data.content, plan: data.plan || m.plan,
-              status: "done" as const,
-              duration: durationSec,
-            }));
-            break;
-          case "agent_error":
-            eventSource.close();
-            setSending(false);
-            setCurrentTool(undefined);
-            setCurrentToolMsg(undefined);
-            setStatus({ type: "error", message: "LEO encountered an issue" });
-            setTimeout(() => setStatus({ type: "idle", message: "" }), 4000);
-            updateMsg(id, leoMsgId, (m) => ({
-              ...m, content: data.content, plan: data.plan || m.plan,
-              status: "error" as const,
-            }));
-            break;
+        setStatus({ type: "idle", message: "" });
+      } else {
+        if (isMultiAgent) {
+          const res = await fetch("http://localhost:8000/agent/multi", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task: userMsg.content, user_id: userId }),
+          });
+          const data = await res.json();
+          
+          setSending(false);
+          setRefreshTrigger((n) => n + 1);
+          setStatus({ type: "done", message: "Task completed successfully" });
+          setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
+          updateMsg(convoId!, leoMsgId, (m) => ({
+            ...m, 
+            content: data.final_answer || "Multi-agent task complete.", 
+            steps: data.steps || [],
+            status: "done" as const,
+          }));
+          return;
         }
-      };
 
-      eventSource.onerror = () => {
-        eventSource.close();
-        setSending(false);
-        setStatus({ type: "error", message: "Connection lost" });
-        setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
-        updateMsg(convoId!, leoMsgId, (m) => ({
-          ...m, content: "Connection to LEO lost.", status: "error" as const,
-        }));
-      };
+        const url = `http://localhost:8000/agent/stream?task=${encodeURIComponent(userMsg.content)}&user_id=${encodeURIComponent(userId)}&max_steps=10`;
+        const eventSource = new EventSource(url);
+
+        eventSource.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          const id = convoId!;
+
+          switch (data.type) {
+            case "plan":
+            case "plan_update":
+              updateMsg(id, leoMsgId, (m) => ({ ...m, plan: data.plan }));
+              break;
+            case "thinking":
+              setCurrentTool(undefined);
+              setCurrentToolMsg("Thinking...");
+              setStatus({ type: "thinking", message: "LEO is reasoning..." });
+              break;
+            case "tool_start": {
+              setCurrentTool(data.tool);
+              const smartMessages: Record<string, string> = {
+                write_file: `Writing ${data.params?.filename || "file"}`,
+                read_file: `Reading ${data.params?.filename || "file"}`,
+                run_code: `Running ${data.params?.language || "code"}`,
+                web_search: `Searching for "${data.params?.query?.slice(0, 25) || "..."}..."`,
+                git_create_branch: `Creating branch ${data.params?.branch_name || ""}`,
+                git_commit_changes: "Committing changes",
+                git_push_branch: "Pushing to GitHub",
+                git_open_pull_request: "Opening pull request",
+              };
+              setCurrentToolMsg(smartMessages[data.tool] || `Using ${data.tool}`);
+
+              const toolMessages: Record<string, string> = {
+                write_file: `Writing ${data.params?.filename || "file"}...`,
+                read_file: `Reading ${data.params?.filename || "file"}...`,
+                run_code: `Running ${data.params?.language || "code"}...`,
+                run_shell: `Running command...`,
+                web_search: `Searching for "${data.params?.query?.slice(0, 30) || "..."}"`,
+                git_create_branch: `Creating branch ${data.params?.branch_name || ""}...`,
+                git_commit_changes: `Committing changes...`,
+                git_push_branch: `Pushing to GitHub...`,
+                git_open_pull_request: `Opening pull request...`,
+                list_files: `Listing workspace files...`,
+              };
+              setStatus({
+                type: "tool",
+                message: toolMessages[data.tool] || `Using ${data.tool}...`,
+              });
+              updateMsg(id, leoMsgId, (m) => ({
+                ...m,
+                steps: [...(m.steps || []), {
+                  step: data.step, type: "tool_call" as const,
+                  tool: data.tool, params: data.params,
+                }],
+              }));
+              break;
+            }
+            case "tool_result":
+              updateMsg(id, leoMsgId, (m) => ({
+                ...m,
+                steps: (m.steps || []).map((s) =>
+                  s.step === data.step ? { ...s, result: data.result } : s
+                ),
+              }));
+              break;
+            case "thought":
+              setCurrentTool(undefined);
+              setCurrentToolMsg("Thinking...");
+              setStatus({ type: "thinking", message: "LEO is reasoning..." });
+              updateMsg(id, leoMsgId, (m) => ({
+                ...m,
+                steps: [...(m.steps || []), {
+                  step: data.step, type: "thought" as const, content: data.content
+                }],
+              }));
+              break;
+            case "done":
+              const durationMs = Date.now() - taskStartTime.current;
+              const durationSec = Math.round(durationMs / 1000);
+              eventSource.close();
+              setSending(false);
+              setRefreshTrigger((n) => n + 1);
+              setCurrentTool(undefined);
+              setCurrentToolMsg(undefined);
+              setStatus({ type: "done", message: "Task completed successfully" });
+              setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
+              updateMsg(id, leoMsgId, (m) => ({
+                ...m, content: data.content, plan: data.plan || m.plan,
+                status: "done" as const,
+                duration: durationSec,
+              }));
+              break;
+            case "agent_error":
+              eventSource.close();
+              setSending(false);
+              setCurrentTool(undefined);
+              setCurrentToolMsg(undefined);
+              setStatus({ type: "error", message: "LEO encountered an issue" });
+              setTimeout(() => setStatus({ type: "idle", message: "" }), 4000);
+              updateMsg(id, leoMsgId, (m) => ({
+                ...m, content: data.content, plan: data.plan || m.plan,
+                status: "error" as const,
+              }));
+              break;
+          }
+        };
+
+        eventSource.onerror = () => {
+          eventSource.close();
+          setSending(false);
+          setStatus({ type: "error", message: "Connection lost" });
+          setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
+          updateMsg(convoId!, leoMsgId, (m) => ({
+            ...m, content: "Connection to LEO lost.", status: "error" as const,
+          }));
+        };
+      }
     } catch {
       setSending(false);
+      clearAttachments();
       setStatus({ type: "error", message: "Failed to connect" });
       setTimeout(() => setStatus({ type: "idle", message: "" }), 3000);
     }
@@ -466,6 +509,10 @@ export default function Home() {
                 inputRef={inputRef}
                 isMultiAgent={isMultiAgent}
                 onToggleMultiAgent={() => setIsMultiAgent(!isMultiAgent)}
+                attachments={attachments}
+                onAttach={addFiles}
+                onRemoveAttachment={removeAttachment}
+                attachError={attachError}
               />
             </div>
           </div>

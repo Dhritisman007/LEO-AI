@@ -18,6 +18,7 @@ export type Message = {
   id: string;
   role: "user" | "leo";
   content: string;
+  attachments?: { name: string; type: string }[];
   steps?: AgentStep[];
   plan?: PlanStep[];
   recalled_memories?: { task: string; success: boolean }[];

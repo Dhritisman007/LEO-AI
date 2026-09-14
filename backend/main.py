@@ -134,6 +134,66 @@ async def multi_agent(req: MultiAgentRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+from fastapi import UploadFile, File, Form
+
+@app.post("/agent/with-file")
+async def agent_with_file(
+    task: str = Form(...),
+    user_id: str = Form(default="anonymous"),
+    max_steps: int = Form(default=10),
+    file: UploadFile = File(...)
+):
+    """Run agent with an attached file as context."""
+    try:
+        check_rate_limit(user_id)
+
+        content = await file.read()
+        filename = file.filename or "uploaded_file"
+        content_type = file.content_type or ""
+
+        # Decode file content based on type
+        file_context = ""
+
+        if content_type.startswith("image/"):
+            # Save image to workspace for LEO to reference
+            import os
+            workspace = f"/tmp/leo_workspace/{user_id}"
+            os.makedirs(workspace, exist_ok=True)
+            filepath = os.path.join(workspace, filename)
+            with open(filepath, "wb") as f:
+                f.write(content)
+            file_context = f"[Image attached: {filename} — saved to workspace. You can reference it by filename.]"
+
+        elif content_type == "application/pdf":
+            # Extract text from PDF
+            try:
+                import io
+                import pypdf
+                pdf = pypdf.PdfReader(io.BytesIO(content))
+                text = "\n".join(page.extract_text() for page in pdf.pages if page.extract_text())
+                file_context = f"[PDF: {filename}]\n{text[:8000]}"
+            except Exception:
+                file_context = f"[PDF attached: {filename} — could not extract text]"
+
+        else:
+            # Plain text, code, JSON, CSV, markdown etc
+            try:
+                text = content.decode("utf-8")
+                file_context = f"[File: {filename}]\n```\n{text[:8000]}\n```"
+            except UnicodeDecodeError:
+                file_context = f"[Binary file attached: {filename} — cannot read as text]"
+
+        # Inject file context into the task
+        enriched_task = f"{task}\n\nATTACHED FILE CONTEXT:\n{file_context}"
+
+        result = run_agent(enriched_task, max_steps, user_id)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/agent/stream")
 async def agent_stream(task: str, user_id: str = "anonymous", max_steps: int = 10):
     try:

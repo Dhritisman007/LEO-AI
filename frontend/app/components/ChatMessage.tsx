@@ -147,7 +147,18 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
         className="msg-user-wrap"
       >
-        <div className="msg-user">{message.content}</div>
+        {/* Show attachments above the message */}
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="msg-user-attachments">
+            {message.attachments.map((a, i) => (
+              <div key={i} className="msg-user-attachment">
+                <span>{a.type.startsWith("image/") ? "🖼️" : "📎"}</span>
+                <span>{a.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="msg-user">{message.content || "(file attached)"}</div>
         <span className="msg-timestamp">{timeAgo(message.timestamp)}</span>
       </motion.div>
     );
