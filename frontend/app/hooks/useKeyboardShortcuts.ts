@@ -7,6 +7,7 @@ type Shortcuts = {
   onOpenTerminal: () => void;
   onClosePanel: () => void;
   onToggleTheme: () => void;
+  onShowShortcuts: () => void;
 };
 
 export function useKeyboardShortcuts({
@@ -15,6 +16,7 @@ export function useKeyboardShortcuts({
   onOpenTerminal,
   onClosePanel,
   onToggleTheme,
+  onShowShortcuts,
 }: Shortcuts) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -49,9 +51,15 @@ export function useKeyboardShortcuts({
       if (e.key === "Escape") {
         onClosePanel();
       }
+
+      // ? → show shortcuts
+      if (e.key === "?" && !["INPUT", "TEXTAREA"].includes((e.target as HTMLElement).tagName)) {
+        e.preventDefault();
+        onShowShortcuts();
+      }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onFocusInput, onNewConversation, onOpenTerminal, onClosePanel, onToggleTheme]);
+  }, [onFocusInput, onNewConversation, onOpenTerminal, onClosePanel, onToggleTheme, onShowShortcuts]);
 }

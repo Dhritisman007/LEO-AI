@@ -221,72 +221,60 @@ export default function Sidebar({
               </div>
             ) : (
               <AnimatePresence>
-                {today.length > 0 && (
-                  <>
-                    <SectionLabel label="Today" />
-                    {today.map((c) => (
-                      <motion.div
-                        key={c.id}
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -8 }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        <ConversationItem
-                          convo={c}
-                          isActive={c.id === activeConversationId}
-                          onSelect={() => onSelectConversation(c.id)}
-                          onDelete={() => onDeleteConversation(c.id)}
-                          onRename={(t) => onRenameConversation(c.id, t)}
-                        />
-                      </motion.div>
-                    ))}
-                  </>
-                )}
-                {week.length > 0 && (
-                  <>
-                    <SectionLabel label="This week" />
-                    {week.map((c) => (
-                      <motion.div
-                        key={c.id}
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -8 }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        <ConversationItem
-                          convo={c}
-                          isActive={c.id === activeConversationId}
-                          onSelect={() => onSelectConversation(c.id)}
-                          onDelete={() => onDeleteConversation(c.id)}
-                          onRename={(t) => onRenameConversation(c.id, t)}
-                        />
-                      </motion.div>
-                    ))}
-                  </>
-                )}
-                {older.length > 0 && (
-                  <>
-                    <SectionLabel label="Older" />
-                    {older.map((c) => (
-                      <motion.div
-                        key={c.id}
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -8 }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        <ConversationItem
-                          convo={c}
-                          isActive={c.id === activeConversationId}
-                          onSelect={() => onSelectConversation(c.id)}
-                          onDelete={() => onDeleteConversation(c.id)}
-                          onRename={(t) => onRenameConversation(c.id, t)}
-                        />
-                      </motion.div>
-                    ))}
-                  </>
-                )}
+                {today.length > 0 && <SectionLabel key="label-today" label="Today" />}
+                {today.map((c) => (
+                  <motion.div
+                    key={c.id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -8 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <ConversationItem
+                      convo={c}
+                      isActive={c.id === activeConversationId}
+                      onSelect={() => onSelectConversation(c.id)}
+                      onDelete={() => onDeleteConversation(c.id)}
+                      onRename={(t) => onRenameConversation(c.id, t)}
+                    />
+                  </motion.div>
+                ))}
+                {week.length > 0 && <SectionLabel key="label-week" label="This week" />}
+                {week.map((c) => (
+                  <motion.div
+                    key={c.id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -8 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <ConversationItem
+                      convo={c}
+                      isActive={c.id === activeConversationId}
+                      onSelect={() => onSelectConversation(c.id)}
+                      onDelete={() => onDeleteConversation(c.id)}
+                      onRename={(t) => onRenameConversation(c.id, t)}
+                    />
+                  </motion.div>
+                ))}
+                {older.length > 0 && <SectionLabel key="label-older" label="Older" />}
+                {older.map((c) => (
+                  <motion.div
+                    key={c.id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -8 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <ConversationItem
+                      convo={c}
+                      isActive={c.id === activeConversationId}
+                      onSelect={() => onSelectConversation(c.id)}
+                      onDelete={() => onDeleteConversation(c.id)}
+                      onRename={(t) => onRenameConversation(c.id, t)}
+                    />
+                  </motion.div>
+                ))}
               </AnimatePresence>
             )}
           </div>

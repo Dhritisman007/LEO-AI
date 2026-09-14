@@ -1,10 +1,12 @@
 "use client";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Wrench, CheckCircle2, XCircle, Brain,
-  Loader2, BookOpen, Copy, Check, ChevronDown, ChevronUp, Zap
+  Loader2, BookOpen, Copy, Check, ChevronDown, ChevronUp, Zap, RefreshCw, Trash2
 } from "lucide-react";
+import ContextMenu from "./ContextMenu";
+import ReactionPicker from "./ReactionPicker";
 import { Message } from "../types";
 import PlanTracker from "./PlanTracker";
 import ExplainPanel from "./ExplainPanel";
@@ -91,14 +93,68 @@ type Props = {
   message: Message;
   allMessages: Message[];
   userId: string;
+  onToggleReaction: (messageId: string, emoji: string) => void;
+  getReactions: (messageId: string) => string[];
+  onDelete?: (messageId: string) => void;
+  onRegenerate?: (messageId: string) => void;
 };
 
-export default function ChatMessage({ message, allMessages, userId }: Props) {
+export default function ChatMessage({
+  message, allMessages, userId,
+  onToggleReaction, getReactions,
+  onDelete, onRegenerate
+}: Props) {
   const [showExplain, setShowExplain] = useState(false);
   const [explaining, setExplaining] = useState(false);
   const [explanation, setExplanation] = useState("");
   const [copied, setCopied] = useState(false);
   const [stepsExpanded, setStepsExpanded] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }
+
+  function getContextItems() {
+    const items: any[] = [
+      {
+        icon: <Copy size={13} />,
+        label: "Copy text",
+        action: () => navigator.clipboard.writeText(message.content || ""),
+      },
+    ];
+
+    if (message.role === "leo" && message.status === "done") {
+      items.push({
+        icon: <RefreshCw size={13} />,
+        label: "Regenerate",
+        action: () => onRegenerate?.(message.id),
+      });
+      if (hasCode) {
+        items.push({
+          icon: <Copy size={13} />,
+          label: "Copy code",
+          action: () => codeInfo && navigator.clipboard.writeText(codeInfo.code),
+        });
+        items.push({
+          icon: <BookOpen size={13} />,
+          label: "Explain code",
+          action: handleExplain,
+        });
+      }
+    }
+
+    items.push({
+      icon: <Trash2 size={13} />,
+      label: "Delete message",
+      action: () => onDelete?.(message.id),
+      danger: true,
+      divider: true,
+    });
+
+    return items;
+  }
 
   const codeInfo = message.role === "leo" ? extractCode(message) : null;
   const hasCode = !!codeInfo;
@@ -142,6 +198,7 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
   if (message.role === "user") {
     return (
       <motion.div
+        onContextMenu={handleContextMenu}
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
@@ -160,12 +217,24 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
         )}
         <div className="msg-user">{message.content || "(file attached)"}</div>
         <span className="msg-timestamp">{timeAgo(message.timestamp)}</span>
+
+        <AnimatePresence>
+          {contextMenu && (
+            <ContextMenu
+              x={contextMenu.x}
+              y={contextMenu.y}
+              items={getContextItems()}
+              onClose={() => setContextMenu(null)}
+            />
+          )}
+        </AnimatePresence>
       </motion.div>
     );
   }
 
   return (
     <motion.div
+      onContextMenu={handleContextMenu}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
@@ -273,6 +342,15 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
         </div>
       )}
 
+      {/* Reactions — only on LEO messages */}
+      {message.role === "leo" && message.status === "done" && (
+        <ReactionPicker
+          messageId={message.id}
+          activeReactions={getReactions(message.id)}
+          onToggle={(emoji) => onToggleReaction(message.id, emoji)}
+        />
+      )}
+
       {/* PR Review */}
       {message.review && message.status === "done" && (
         <div className={`review-card ${message.review.score >= 8 ? "review-card--good"
@@ -328,6 +406,17 @@ export default function ChatMessage({ message, allMessages, userId }: Props) {
           onClose={() => { setShowExplain(false); setExplanation(""); }}
         />
       )}
+
+      <AnimatePresence>
+        {contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            items={getContextItems()}
+            onClose={() => setContextMenu(null)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

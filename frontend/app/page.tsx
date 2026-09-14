@@ -23,6 +23,9 @@ import TypingIndicator from "./components/TypingIndicator";
 import { useConversations } from "./hooks/useConversations";
 import { useTheme } from "./hooks/useTheme";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useSidebarResize } from "./hooks/useSidebarResize";
+import { useReactions } from "./hooks/useReactions";
+import ShortcutSheet from "./components/ShortcutSheet";
 import { Message, Conversation } from "./types";
 
 export default function Home() {
@@ -62,6 +65,10 @@ export default function Home() {
   const [currentTool, setCurrentTool] = useState<string | undefined>(undefined);
   const [currentToolMsg, setCurrentToolMsg] = useState<string | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  const { width: sidebarWidth, resizing, onMouseDown: onSidebarResize } = useSidebarResize();
+  const { toggleReaction, getReactions } = useReactions();
 
   const activeConversation = getActiveConversation();
   const messages = activeConversation?.messages || [];
@@ -79,12 +86,42 @@ export default function Home() {
       setShowEvals(false);
       setSelectedFile(null);
       setViewingConversation(null);
+      setShowShortcuts(false);
     },
     onToggleTheme: toggleTheme,
+    onShowShortcuts: () => setShowShortcuts(true),
   });
 
   function updateMsg(convoId: string, leoMsgId: string, updater: (m: Message) => Message) {
     updateMessage(convoId, leoMsgId, updater);
+  }
+
+  function handleDeleteMessage(messageId: string) {
+    if (!activeConversationId) return;
+    const msgs = getActiveConversation()?.messages || [];
+    updateConversation(
+      activeConversationId,
+      msgs.filter((m) => m.id !== messageId)
+    );
+  }
+
+  async function handleRegenerateMessage(messageId: string) {
+    if (!activeConversationId) return;
+    const msgs = getActiveConversation()?.messages || [];
+    const msgIndex = msgs.findIndex((m) => m.id === messageId);
+    if (msgIndex < 0) return;
+
+    // Find the user message before this LEO message
+    const userMsg = msgs.slice(0, msgIndex).reverse().find((m) => m.role === "user");
+    if (!userMsg) return;
+
+    // Remove the old LEO message and re-run
+    const newMsgs = msgs.filter((m) => m.id !== messageId);
+    updateConversation(activeConversationId, newMsgs);
+
+    // Re-trigger with the same user message
+    setInput(userMsg.content);
+    setTimeout(() => handleSend(), 50);
   }
 
   function handleSelectConversation(id: string) {
@@ -319,206 +356,236 @@ export default function Home() {
   const hasOverlay = showTerminal || showEvals || !!selectedFile || !!viewingConversation;
 
   return (
-    <LoginGate>
-      <div className="leo-layout">
-        {/* ── Mobile sidebar backdrop ── */}
-        <AnimatePresence>
-          {sidebarOpen && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="leo-backdrop"
-              onClick={() => setSidebarOpen(false)}
+    <>
+      <LoginGate>
+        <div className="leo-layout">
+          {/* ── Mobile sidebar backdrop ── */}
+          <AnimatePresence>
+            {sidebarOpen && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="leo-backdrop"
+                onClick={() => setSidebarOpen(false)}
+              />
+            )}
+          </AnimatePresence>
+
+          {/* ── Sidebar ── */}
+          <aside
+            className={`leo-sidebar ${sidebarOpen ? "leo-sidebar--open" : ""}`}
+            style={{ width: sidebarWidth }}
+          >
+            <Sidebar
+              conversations={conversations}
+              activeConversationId={activeConversationId}
+              onSelectConversation={handleSelectConversation}
+              onNewConversation={handleNewConversation}
+              onDeleteConversation={deleteConversation}
+              onRenameConversation={renameConversation}
+              onFileSelect={setSelectedFile}
+              refreshTrigger={refreshTrigger}
+              userId={userId}
             />
-          )}
-        </AnimatePresence>
 
-        {/* ── Sidebar ── */}
-        <aside className={`leo-sidebar ${sidebarOpen ? "leo-sidebar--open" : ""}`}>
-          <Sidebar
-            conversations={conversations}
-            activeConversationId={activeConversationId}
-            onSelectConversation={handleSelectConversation}
-            onNewConversation={handleNewConversation}
-            onDeleteConversation={deleteConversation}
-            onRenameConversation={renameConversation}
-            onFileSelect={setSelectedFile}
-            refreshTrigger={refreshTrigger}
-            userId={userId}
-          />
-        </aside>
+            {/* Resize handle */}
+            <div
+              className={`sidebar-resize-handle ${resizing ? "sidebar-resize-handle--active" : ""}`}
+              onMouseDown={onSidebarResize}
+              title="Drag to resize"
+            />
+          </aside>
 
-        {/* ── Main ── */}
-        <main className="leo-main">
-          {/* Header */}
-          <header className="leo-header">
-            <div className="leo-header__left">
-              <button
-                className="leo-icon-btn leo-mobile-only"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-              >
-                {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
-              </button>
-              <div className="leo-logo">
-                <span className="leo-logo__icon"><Zap size={18} className="text-indigo-400" /></span>
-                <span className="leo-logo__name">LEO</span>
-                <span className="leo-logo__tag">beta</span>
+          {/* Prevent text selection while resizing */}
+          {resizing && <div className="resize-overlay" />}
+
+          {/* ── Main ── */}
+          <main className="leo-main">
+            {/* Header */}
+            <header className="leo-header">
+              <div className="leo-header__left">
+                <button
+                  className="leo-icon-btn leo-mobile-only"
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                >
+                  {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
+                </button>
+                <div className="leo-logo">
+                  <span className="leo-logo__icon"><Zap size={18} className="text-indigo-400" /></span>
+                  <span className="leo-logo__name">LEO</span>
+                  <span className="leo-logo__tag">beta</span>
+                </div>
               </div>
-            </div>
 
-            <div className="leo-header__right">
-              <button
-                onClick={() => setShowTerminal(true)}
-                className="leo-header-btn"
-              >
-                <TerminalSquare size={14} />
-                <span>Terminal</span>
-                <kbd>⌘/</kbd>
-              </button>
-              <button
-                onClick={() => setShowEvals(true)}
-                className="leo-header-btn"
-              >
-                <FlaskConical size={14} />
-                <span>Evals</span>
-              </button>
-              <div className="leo-header-divider" />
-              <button onClick={toggleTheme} className="leo-icon-btn">
-                {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-              </button>
-              {session?.user?.image && (
-                <img
-                  src={session.user.image}
-                  alt="avatar"
-                  className="leo-avatar"
-                />
-              )}
-            </div>
-          </header>
-
-          {/* Status Bar */}
-          <StatusBar status={status} />
-
-          {/* Content area */}
-          <div className="leo-content">
-            {/* Overlays */}
-            <AnimatePresence>
-              {selectedFile && (
-                <motion.div
-                  key="file-preview"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                  className="leo-overlay"
+              <div className="leo-header__right">
+                <button
+                  onClick={() => setShowTerminal(true)}
+                  className="leo-header-btn"
                 >
-                  <FilePreview
-                    filename={selectedFile}
-                    onClose={() => setSelectedFile(null)}
+                  <TerminalSquare size={14} />
+                  <span>Terminal</span>
+                  <kbd>⌘/</kbd>
+                </button>
+                <button
+                  onClick={() => setShowEvals(true)}
+                  className="leo-header-btn"
+                >
+                  <FlaskConical size={14} />
+                  <span>Evals</span>
+                </button>
+                <div className="leo-header-divider" />
+                <button
+                  onClick={() => setShowShortcuts(true)}
+                  className="leo-icon-btn"
+                  title="Keyboard shortcuts (?)"
+                >
+                  <span style={{ fontSize: "14px", fontWeight: 700, color: "#444" }}>?</span>
+                </button>
+                <button onClick={toggleTheme} className="leo-icon-btn">
+                  {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+                </button>
+                {session?.user?.image && (
+                  <img
+                    src={session.user.image}
+                    alt="avatar"
+                    className="leo-avatar"
                   />
-                </motion.div>
-              )}
-              {showTerminal && (
-                <motion.div
-                  key="terminal"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                  className="leo-overlay"
-                >
-                  <TerminalPanel onClose={() => setShowTerminal(false)} />
-                </motion.div>
-              )}
-              {showEvals && (
-                <motion.div
-                  key="evals"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                  className="leo-overlay"
-                >
-                  <EvalDashboard onClose={() => setShowEvals(false)} />
-                </motion.div>
-              )}
-              {viewingConversation && (
-                <motion.div
-                  key="convo-viewer"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                  className="leo-overlay"
-                >
-                  <ConversationViewer
-                    conversation={viewingConversation}
-                    onClose={() => setViewingConversation(null)}
-                    onResume={(c) => {
-                      setViewingConversation(null);
-                      switchConversation(c.id);
-                    }}
-                    userId={userId}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Messages */}
-            <div className="leo-messages">
-              <div className="leo-messages__inner">
-                {!loaded ? null : messages.length === 0 ? (
-                  <EmptyState onSelect={(prompt) => { setInput(prompt); inputRef.current?.focus(); }} />
-                ) : (
-                  <AnimatePresence initial={false}>
-                    {messages.map((m) => (
-                      <ChatMessage
-                        key={m.id}
-                        message={m}
-                        allMessages={messages}
-                        userId={userId}
-                      />
-                    ))}
-                  </AnimatePresence>
                 )}
-                {sending &&
-                  messages[messages.length - 1]?.status === "pending" &&
-                  !messages[messages.length - 1]?.content &&
-                  !messages[messages.length - 1]?.steps?.length && (
-                    <TypingIndicator
-                      toolName={currentTool}
-                      message={currentToolMsg}
+              </div>
+            </header>
+
+            {/* Status Bar */}
+            <StatusBar status={status} />
+
+            {/* Content area */}
+            <div className="leo-content">
+              {/* Overlays */}
+              <AnimatePresence>
+                {selectedFile && (
+                  <motion.div
+                    key="file-preview"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="leo-overlay"
+                  >
+                    <FilePreview
+                      filename={selectedFile}
+                      onClose={() => setSelectedFile(null)}
                     />
+                  </motion.div>
+                )}
+                {showTerminal && (
+                  <motion.div
+                    key="terminal"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="leo-overlay"
+                  >
+                    <TerminalPanel onClose={() => setShowTerminal(false)} />
+                  </motion.div>
+                )}
+                {showEvals && (
+                  <motion.div
+                    key="evals"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="leo-overlay"
+                  >
+                    <EvalDashboard onClose={() => setShowEvals(false)} />
+                  </motion.div>
+                )}
+                {viewingConversation && (
+                  <motion.div
+                    key="convo-viewer"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="leo-overlay"
+                  >
+                    <ConversationViewer
+                      conversation={viewingConversation}
+                      onClose={() => setViewingConversation(null)}
+                      onResume={(c) => {
+                        setViewingConversation(null);
+                        switchConversation(c.id);
+                      }}
+                      userId={userId}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Messages */}
+              <div className="leo-messages">
+                <div className="leo-messages__inner">
+                  {!loaded ? null : messages.length === 0 ? (
+                    <EmptyState onSelect={(prompt) => { setInput(prompt); inputRef.current?.focus(); }} />
+                  ) : (
+                    <AnimatePresence initial={false}>
+                      {messages.map((m) => (
+                        <ChatMessage
+                          key={m.id}
+                          message={m}
+                          allMessages={messages}
+                          userId={userId}
+                          onToggleReaction={toggleReaction}
+                          getReactions={getReactions}
+                          onDelete={handleDeleteMessage}
+                          onRegenerate={handleRegenerateMessage}
+                        />
+                      ))}
+                    </AnimatePresence>
                   )}
-                <div ref={bottomRef} />
+                  {sending &&
+                    messages[messages.length - 1]?.status === "pending" &&
+                    !messages[messages.length - 1]?.content &&
+                    !messages[messages.length - 1]?.steps?.length && (
+                      <TypingIndicator
+                        toolName={currentTool}
+                        message={currentToolMsg}
+                      />
+                    )}
+                  <div ref={bottomRef} />
+                </div>
+              </div>
+
+              {/* Input area */}
+              <div className="leo-input-area">
+                <TaskTemplates
+                  visible={messages.length === 0}
+                  onSelect={(p) => setInput(p)}
+                />
+                <ChatInput
+                  value={input}
+                  onChange={setInput}
+                  onSend={handleSend}
+                  disabled={sending}
+                  inputRef={inputRef}
+                  isMultiAgent={isMultiAgent}
+                  onToggleMultiAgent={() => setIsMultiAgent(!isMultiAgent)}
+                  attachments={attachments}
+                  onAttach={addFiles}
+                  onRemoveAttachment={removeAttachment}
+                  attachError={attachError}
+                />
               </div>
             </div>
-
-            {/* Input area */}
-            <div className="leo-input-area">
-              <TaskTemplates
-                visible={messages.length === 0}
-                onSelect={(p) => setInput(p)}
-              />
-              <ChatInput
-                value={input}
-                onChange={setInput}
-                onSend={handleSend}
-                disabled={sending}
-                inputRef={inputRef}
-                isMultiAgent={isMultiAgent}
-                onToggleMultiAgent={() => setIsMultiAgent(!isMultiAgent)}
-                attachments={attachments}
-                onAttach={addFiles}
-                onRemoveAttachment={removeAttachment}
-                attachError={attachError}
-              />
-            </div>
-          </div>
-        </main>
-      </div>
-    </LoginGate>
+          </main>
+        </div>
+      </LoginGate>
+      <ShortcutSheet
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
+    </>
   );
 }
 
