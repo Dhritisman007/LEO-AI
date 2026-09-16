@@ -18,6 +18,10 @@ from sse_starlette.sse import EventSourceResponse
 from agent_streaming import run_agent_streaming
 from checkpoints import list_checkpoints, load_checkpoint, delete_checkpoint
 from multi_agent import run_multi_agent
+from analytics import (
+    get_overview, get_daily_activity, get_top_tools,
+    get_recent_tasks, get_language_breakdown,
+)
 
 load_dotenv()
 
@@ -344,3 +348,30 @@ async def websocket_execute(websocket: WebSocket):
         print("WebSocket client disconnected")
     except Exception as e:
         print(f"WebSocket error: {e}")
+
+
+# ── Analytics endpoints ────────────────────────────────────────
+
+@app.get("/analytics/overview")
+def analytics_overview(user_id: str = "anonymous", days: int = 30):
+    return get_overview(user_id, days)
+
+
+@app.get("/analytics/daily")
+def analytics_daily(user_id: str = "anonymous", days: int = 14):
+    return {"data": get_daily_activity(user_id, days)}
+
+
+@app.get("/analytics/tools")
+def analytics_tools(user_id: str = "anonymous", days: int = 30):
+    return {"tools": get_top_tools(user_id, days)}
+
+
+@app.get("/analytics/tasks")
+def analytics_tasks(user_id: str = "anonymous", limit: int = 20):
+    return {"tasks": get_recent_tasks(user_id, limit)}
+
+
+@app.get("/analytics/languages")
+def analytics_languages(user_id: str = "anonymous", days: int = 30):
+    return {"languages": get_language_breakdown(user_id, days)}

@@ -1,6 +1,7 @@
 import json
 import re
 import time
+import uuid
 import os
 # pyrefly: ignore [missing-import]
 import google.generativeai as genai
@@ -16,6 +17,7 @@ from style_guides import get_style_guide, detect_language_from_task
 from test_generator import generate_tests, get_test_filename
 from static_analysis import run_analysis
 from critic import pr_review, rewrite_code
+from analytics import log_task, log_tool_call
 
 def classify_failure(tool_name: str, error: str) -> str:
     """Classify a tool failure to decide how to handle retry."""
@@ -369,6 +371,11 @@ def run_agent(
 ) -> dict:
     log(f"\n{'='*50}\nNEW TASK [{user_id}]: {task}\n{'='*50}")
 
+    # Analytics tracking
+    task_id = str(uuid.uuid4())
+    task_start_ms = int(time.time() * 1000)
+    tool_calls_log: list[str] = []
+
     # Resume from checkpoint if provided
     if checkpoint:
         log(f"RESUMING from checkpoint — {len(checkpoint['steps'])} steps already done")
@@ -543,15 +550,30 @@ def run_agent(
                     ]
                     if tool_name in USER_SCOPED_TOOLS:
                         params["user_id"] = user_id
-                        
+
                     log(f"Running tool: {tool_name} with {params}")
+                    tool_start_ms = int(time.time() * 1000)
                     tool_result = TOOLS[tool_name](**params)
+                    tool_duration_ms = int(time.time() * 1000) - tool_start_ms
                 except TypeError as e:
                     tool_result = {"success": False, "error": f"Bad parameters: {str(e)}"}
+                    tool_duration_ms = 0
                 except Exception as e:
                     tool_result = {"success": False, "error": str(e)}
+                    tool_duration_ms = 0
             else:
                 tool_result = {"success": False, "error": f"Tool '{tool_name}' not found"}
+                tool_duration_ms = 0
+
+            # Log this tool call to analytics
+            tool_calls_log.append(tool_name)
+            log_tool_call(
+                task_id=task_id,
+                user_id=user_id,
+                tool_name=tool_name,
+                success=bool(tool_result.get("success", False)),
+                duration_ms=tool_duration_ms,
+            )
 
             log(f"Tool result: {tool_result}")
 
@@ -709,6 +731,19 @@ def run_agent(
                 write_file(main_file["filename"], analysis["formatted_code"], user_id)
                 log("STATIC ANALYSIS: Applied auto-formatting")
 
+    # Log completed task to analytics
+    _log_task_analytics(
+        task_id=task_id,
+        user_id=user_id,
+        task=task,
+        steps=steps,
+        max_steps=max_steps,
+        task_start_ms=task_start_ms,
+        tool_calls_log=tool_calls_log,
+        final_answer=final_answer,
+        detected_language=detected_language if not checkpoint else None,
+    )
+
     return {
         "task": task,
         "plan": plan,
@@ -717,6 +752,31 @@ def run_agent(
         "total_steps": len(steps),
         "scratchpad": scratchpad_read(user_id),
         "recalled_memories": past_memories,
-        "review": review,        # NEW
-        "analysis": analysis,    # NEW
+        "review": review,
+        "analysis": analysis,
     }
+
+
+def _log_task_analytics(
+    task_id, user_id, task, steps, max_steps, task_start_ms,
+    tool_calls_log, final_answer, detected_language
+):
+    """Fire-and-forget analytics log for run_agent."""
+    try:
+        was_successful = final_answer is not None and not str(final_answer).startswith("ERROR")
+        duration_ms = int(time.time() * 1000) - task_start_ms
+        log_task(
+            task_id=task_id,
+            user_id=user_id,
+            task=task,
+            status="success" if was_successful else "error",
+            steps_taken=len(steps),
+            max_steps=max_steps,
+            duration_ms=duration_ms,
+            tools_used=list(set(tool_calls_log)),
+            language=detected_language,
+            input_chars=len(task),
+            output_chars=len(str(final_answer or "")),
+        )
+    except Exception as e:
+        print(f"Analytics post-task log failed: {e}")

@@ -26,6 +26,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useSidebarResize } from "./hooks/useSidebarResize";
 import { useReactions } from "./hooks/useReactions";
 import ShortcutSheet from "./components/ShortcutSheet";
+import AnalyticsDashboard from "./components/AnalyticsDashboard";
 import { Message, Conversation } from "./types";
 
 export default function Home() {
@@ -66,6 +67,7 @@ export default function Home() {
   const [currentToolMsg, setCurrentToolMsg] = useState<string | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   const { width: sidebarWidth, resizing, onMouseDown: onSidebarResize } = useSidebarResize();
   const { toggleReaction, getReactions } = useReactions();
@@ -84,6 +86,7 @@ export default function Home() {
     onClosePanel: () => {
       setShowTerminal(false);
       setShowEvals(false);
+      setShowAnalytics(false);
       setSelectedFile(null);
       setViewingConversation(null);
       setShowShortcuts(false);
@@ -434,6 +437,13 @@ export default function Home() {
                   <FlaskConical size={14} />
                   <span>Evals</span>
                 </button>
+                <button
+                  onClick={() => setShowAnalytics(true)}
+                  className="leo-header-btn"
+                >
+                  <Activity size={14} />
+                  <span>Analytics</span>
+                </button>
                 <div className="leo-header-divider" />
                 <button
                   onClick={() => setShowShortcuts(true)}
@@ -499,6 +509,21 @@ export default function Home() {
                     className="leo-overlay"
                   >
                     <EvalDashboard onClose={() => setShowEvals(false)} />
+                  </motion.div>
+                )}
+                {showAnalytics && (
+                  <motion.div
+                    key="analytics"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="leo-overlay"
+                  >
+                    <AnalyticsDashboard
+                      userId={userId}
+                      onClose={() => setShowAnalytics(false)}
+                    />
                   </motion.div>
                 )}
                 {viewingConversation && (
