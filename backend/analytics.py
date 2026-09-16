@@ -5,7 +5,8 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-DB_PATH = "/tmp/leo_analytics.db"
+# Store DB next to this file so it survives system restarts (unlike /tmp)
+DB_PATH = os.path.join(os.path.dirname(__file__), "leo_analytics.db")
 
 
 def get_db():

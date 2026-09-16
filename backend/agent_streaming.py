@@ -1,5 +1,7 @@
 import json
 import asyncio
+import time
+import uuid
 # pyrefly: ignore [missing-import]
 import google.generativeai as genai
 from tools import TOOLS, TOOL_DESCRIPTIONS
@@ -15,6 +17,7 @@ from context_engine import format_context_for_prompt
 from checkpoints import save_checkpoint
 from critic import pr_review, rewrite_code
 from style_guides import detect_language_from_task, get_style_guide
+from analytics import log_task, log_tool_call
 
 
 async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "anonymous"):
@@ -29,6 +32,11 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
         await asyncio.sleep(0)  # yield control so FastAPI can flush
 
     scratchpad_clear(user_id)
+
+    # Analytics tracking
+    task_id = str(uuid.uuid4())
+    task_start_ms = int(time.time() * 1000)
+    tool_calls_log: list[str] = []
 
     # Build workspace context — LEO reads the codebase before acting
     workspace_context = format_context_for_prompt(user_id)
@@ -222,13 +230,31 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
                     ]
                     if tool_name in USER_SCOPED_TOOLS:
                         params["user_id"] = user_id
+                    tool_start_ms = int(time.time() * 1000)
                     tool_result = TOOLS[tool_name](**params)
+                    tool_duration_ms = int(time.time() * 1000) - tool_start_ms
                 except TypeError as e:
                     tool_result = {"success": False, "error": f"Bad parameters: {str(e)}"}
+                    tool_duration_ms = 0
                 except Exception as e:
                     tool_result = {"success": False, "error": str(e)}
+                    tool_duration_ms = 0
             else:
                 tool_result = {"success": False, "error": f"Tool '{tool_name}' not found"}
+                tool_duration_ms = 0
+
+            # Log tool call to analytics
+            tool_calls_log.append(tool_name)
+            try:
+                log_tool_call(
+                    task_id=task_id,
+                    user_id=user_id,
+                    tool_name=tool_name,
+                    success=bool(tool_result.get("success", False)),
+                    duration_ms=tool_duration_ms,
+                )
+            except Exception:
+                pass
 
             # Emit tool result
             async for chunk in emit("tool_result", {
@@ -285,3 +311,23 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
 
     was_successful = final_answer is not None and not final_answer.startswith("ERROR")
     remember_task(task, final_answer, was_successful, user_id)
+
+    # Log completed task to analytics
+    try:
+        duration_ms = int(time.time() * 1000) - task_start_ms
+        detected_language = detect_language_from_task(task)
+        log_task(
+            task_id=task_id,
+            user_id=user_id,
+            task=task,
+            status="success" if was_successful else "error",
+            steps_taken=len(steps),
+            max_steps=max_steps,
+            duration_ms=duration_ms,
+            tools_used=list(set(tool_calls_log)),
+            language=detected_language,
+            input_chars=len(task),
+            output_chars=len(str(final_answer or "")),
+        )
+    except Exception as e:
+        log(f"Analytics log failed (streaming): {e}")
