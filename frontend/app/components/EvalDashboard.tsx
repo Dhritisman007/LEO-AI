@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Play, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -33,6 +33,14 @@ export default function EvalDashboard({ onClose }: { onClose: () => void }) {
 
   const categories = ["basic", "functions", "file_ops", "error_handling", "reasoning"];
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   async function runEvals() {
     setRunning(true);
     setSummary(null);
@@ -62,11 +70,17 @@ export default function EvalDashboard({ onClose }: { onClose: () => void }) {
       transition={{ duration: 0.15 }}
       className="absolute inset-0 bg-zinc-950/98 z-20 flex flex-col"
     >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-        <span className="text-sm font-semibold text-zinc-300">🧪 LEO Eval Dashboard</span>
-        <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
-          <X size={16} />
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800 flex-shrink-0">
+        {/* Back button */}
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-100 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-3 py-1.5 rounded-lg transition-all"
+        >
+          <X size={13} />
+          Back
         </button>
+        <div className="w-px h-4 bg-zinc-800" />
+        <span className="text-sm font-semibold text-zinc-200">🧪 Eval Dashboard</span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">

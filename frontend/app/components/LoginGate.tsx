@@ -29,21 +29,6 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return (
-    <div className="relative h-full">
-      <div className="absolute top-3 right-3 z-30 flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-full pl-1 pr-3 py-1">
-        {session.user?.image && (
-          <img src={session.user.image} className="w-6 h-6 rounded-full" alt="avatar" />
-        )}
-        <span className="text-xs text-zinc-300">{session.user?.name}</span>
-        <button
-          onClick={() => signOut()}
-          className="text-xs text-zinc-500 hover:text-red-400 ml-1"
-        >
-          Sign out
-        </button>
-      </div>
-      {children}
-    </div>
-  );
+  // Render children only — user info is shown in the main header
+  return <>{children}</>;
 }

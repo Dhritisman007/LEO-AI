@@ -83,23 +83,58 @@ body {
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 0 var(--space-4);
   background: var(--bg-surface);
   flex-shrink: 0;
   gap: var(--space-3);
+  overflow: hidden;
 }
 
 .leo-header__left {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.leo-header__spacer {
+  flex: 1;
+  min-width: var(--space-3);
 }
 
 .leo-header__right {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Grouped pill-style action buttons */
+.leo-btn-group {
+  display: flex;
+  align-items: center;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.leo-btn-group .leo-header-btn {
+  border: none;
+  border-radius: 0;
+  border-right: 1px solid var(--border-default);
+  background: transparent;
+  height: 28px;
+}
+
+.leo-btn-group .leo-header-btn:last-child {
+  border-right: none;
+}
+
+.leo-btn-group .leo-header-btn:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: var(--border-default);
 }
 
 .leo-logo {
@@ -193,6 +228,57 @@ body {
   height: 26px;
   border-radius: var(--radius-full);
   border: 1px solid var(--border-default);
+}
+
+/* User pill in header */
+.leo-user-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 3px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  max-width: 220px;
+}
+
+.leo-user-pill__avatar {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  border-radius: var(--radius-full);
+  object-fit: cover;
+}
+
+.leo-user-pill__name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 96px;
+}
+
+.leo-user-pill__signout {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border-default);
+  padding: 0 0 0 6px;
+  margin-left: 2px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: color 150ms;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.leo-user-pill__signout:hover {
+  color: #f87171;
 }
 
 /* ── Content ── */

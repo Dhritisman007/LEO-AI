@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   TerminalSquare, FlaskConical, Sun, Moon,
@@ -407,6 +407,7 @@ export default function Home() {
           <main className="leo-main">
             {/* Header */}
             <header className="leo-header">
+              {/* Left: logo */}
               <div className="leo-header__left">
                 <button
                   className="leo-icon-btn leo-mobile-only"
@@ -421,30 +422,31 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* Spacer pushes right side to the edge */}
+              <div className="leo-header__spacer" />
+
+              {/* Right: actions + user */}
               <div className="leo-header__right">
-                <button
-                  onClick={() => setShowTerminal(true)}
-                  className="leo-header-btn"
-                >
-                  <TerminalSquare size={14} />
-                  <span>Terminal</span>
-                  <kbd>⌘/</kbd>
-                </button>
-                <button
-                  onClick={() => setShowEvals(true)}
-                  className="leo-header-btn"
-                >
-                  <FlaskConical size={14} />
-                  <span>Evals</span>
-                </button>
-                <button
-                  onClick={() => setShowAnalytics(true)}
-                  className="leo-header-btn"
-                >
-                  <Activity size={14} />
-                  <span>Analytics</span>
-                </button>
+                {/* Grouped action buttons */}
+                <div className="leo-btn-group">
+                  <button onClick={() => setShowTerminal(true)} className="leo-header-btn">
+                    <TerminalSquare size={14} />
+                    <span>Terminal</span>
+                    <kbd>⌘/</kbd>
+                  </button>
+                  <button onClick={() => setShowEvals(true)} className="leo-header-btn">
+                    <FlaskConical size={14} />
+                    <span>Evals</span>
+                  </button>
+                  <button onClick={() => setShowAnalytics(true)} className="leo-header-btn">
+                    <Activity size={14} />
+                    <span>Analytics</span>
+                  </button>
+                </div>
+
                 <div className="leo-header-divider" />
+
+                {/* Utility icon buttons */}
                 <button
                   onClick={() => setShowShortcuts(true)}
                   className="leo-icon-btn"
@@ -455,15 +457,24 @@ export default function Home() {
                 <button onClick={toggleTheme} className="leo-icon-btn">
                   {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
                 </button>
-                {session?.user?.image && (
-                  <img
-                    src={session.user.image}
-                    alt="avatar"
-                    className="leo-avatar"
-                  />
+
+                <div className="leo-header-divider" />
+
+                {/* User pill */}
+                {session?.user && (
+                  <div className="leo-user-pill" title={session.user.name ?? ""}>
+                    {session.user.image && (
+                      <img src={session.user.image} alt="avatar" className="leo-user-pill__avatar" />
+                    )}
+                    <span className="leo-user-pill__name">{session.user.name}</span>
+                    <button onClick={() => signOut()} className="leo-user-pill__signout">
+                      Sign out
+                    </button>
+                  </div>
                 )}
               </div>
             </header>
+
 
             {/* Status Bar */}
             <StatusBar status={status} />
