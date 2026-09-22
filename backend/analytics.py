@@ -4,9 +4,29 @@ import time
 import os
 from datetime import datetime, timedelta
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+IS_PRODUCTION = ENVIRONMENT == "production"
 
 # Store DB next to this file so it survives system restarts (unlike /tmp)
 DB_PATH = os.path.join(os.path.dirname(__file__), "leo_analytics.db")
+
+_supabase_client = None
+
+
+def get_supabase():
+    global _supabase_client
+    if _supabase_client is None:
+        from supabase import create_client
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        if not url or not key:
+            raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in production")
+        _supabase_client = create_client(url, key)
+    return _supabase_client
 
 
 def get_db():
@@ -16,7 +36,9 @@ def get_db():
 
 
 def init_db():
-    """Create tables if they don't exist."""
+    """Create tables if they don't exist (development / SQLite only)."""
+    if IS_PRODUCTION:
+        return
     conn = get_db()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS tasks (
@@ -97,11 +119,64 @@ def log_task(
     output_chars: int = 0,
 ):
     """Log a completed task."""
+    cost = estimate_cost(input_chars, output_chars)
+    today = datetime.now().strftime("%Y-%m-%d")
+    now = time.time()
+
+    if IS_PRODUCTION:
+        try:
+            supabase = get_supabase()
+            supabase.table("tasks").upsert({
+                "id": task_id,
+                "user_id": user_id,
+                "task": task[:200],
+                "language": language,
+                "status": status,
+                "steps_taken": steps_taken,
+                "max_steps": max_steps,
+                "duration_ms": duration_ms,
+                "tools_used": tools_used,
+                "input_chars": input_chars,
+                "output_chars": output_chars,
+                "created_at": now,
+            }).execute()
+
+            existing = supabase.table("daily_stats") \
+                .select("*") \
+                .eq("date", today) \
+                .eq("user_id", user_id) \
+                .execute()
+            rows = existing.data or []
+            if rows:
+                row = rows[0]
+                supabase.table("daily_stats") \
+                    .update({
+                        "tasks_total": row["tasks_total"] + 1,
+                        "tasks_success": row["tasks_success"] + (1 if status == "success" else 0),
+                        "tasks_error": row["tasks_error"] + (1 if status == "error" else 0),
+                        "total_duration_ms": row["total_duration_ms"] + duration_ms,
+                        "estimated_cost_usd": row["estimated_cost_usd"] + cost,
+                    }) \
+                    .eq("date", today) \
+                    .eq("user_id", user_id) \
+                    .execute()
+            else:
+                supabase.table("daily_stats").insert({
+                    "date": today,
+                    "user_id": user_id,
+                    "tasks_total": 1,
+                    "tasks_success": 1 if status == "success" else 0,
+                    "tasks_error": 1 if status == "error" else 0,
+                    "tool_calls": 0,
+                    "total_duration_ms": duration_ms,
+                    "estimated_cost_usd": cost,
+                }).execute()
+        except Exception as e:
+            print(f"Analytics log failed: {e}")
+        return
+
     try:
         conn = get_db()
-        cost = estimate_cost(input_chars, output_chars)
-        today = datetime.now().strftime("%Y-%m-%d")
-
         conn.execute("""
             INSERT OR REPLACE INTO tasks
             (id, user_id, task, language, status, steps_taken, max_steps,
@@ -110,7 +185,7 @@ def log_task(
         """, (
             task_id, user_id, task[:200], language, status,
             steps_taken, max_steps, duration_ms,
-            json.dumps(tools_used), input_chars, output_chars, time.time()
+            json.dumps(tools_used), input_chars, output_chars, now
         ))
 
         conn.execute("""
@@ -147,6 +222,21 @@ def log_tool_call(
     duration_ms: int = 0,
 ):
     """Log a single tool call."""
+    if IS_PRODUCTION:
+        try:
+            supabase = get_supabase()
+            supabase.table("tool_calls").insert({
+                "task_id": task_id,
+                "user_id": user_id,
+                "tool_name": tool_name,
+                "success": success,
+                "duration_ms": duration_ms,
+                "created_at": time.time(),
+            }).execute()
+        except Exception as e:
+            print(f"Tool call log failed: {e}")
+        return
+
     try:
         conn = get_db()
         conn.execute("""
@@ -163,8 +253,64 @@ def log_tool_call(
 
 def get_overview(user_id: str, days: int = 30) -> dict:
     """Get high-level stats for the last N days."""
-    conn = get_db()
     since = time.time() - (days * 86400)
+
+    if IS_PRODUCTION:
+        supabase = get_supabase()
+        tasks = supabase.table("tasks") \
+            .select("status, duration_ms, steps_taken, input_chars, output_chars") \
+            .eq("user_id", user_id) \
+            .gte("created_at", since) \
+            .execute().data or []
+
+        tool_calls = supabase.table("tool_calls") \
+            .select("success") \
+            .eq("user_id", user_id) \
+            .gte("created_at", since) \
+            .execute().data or []
+
+        since_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        daily = supabase.table("daily_stats") \
+            .select("estimated_cost_usd") \
+            .eq("user_id", user_id) \
+            .gte("date", since_date) \
+            .execute().data or []
+
+        total = len(tasks)
+        success = sum(1 for t in tasks if t["status"] == "success")
+        error = sum(1 for t in tasks if t["status"] == "error")
+        avg_duration_ms = sum(t["duration_ms"] or 0 for t in tasks) / total if total else 0
+        avg_steps = sum(t["steps_taken"] or 0 for t in tasks) / total if total else 0
+
+        tc_total = len(tool_calls)
+        tc_success = sum(1 for t in tool_calls if t["success"])
+
+        cost_total = sum(d["estimated_cost_usd"] or 0 for d in daily)
+
+        return {
+            "period_days": days,
+            "tasks": {
+                "total": total,
+                "success": success,
+                "error": error,
+                "pass_rate": round(success / total * 100, 1) if total else 0,
+            },
+            "performance": {
+                "avg_duration_seconds": round(avg_duration_ms / 1000, 1),
+                "avg_steps": round(avg_steps, 1),
+            },
+            "tool_calls": {
+                "total": tc_total,
+                "success": tc_success,
+                "success_rate": round(tc_success / (tc_total or 1) * 100, 1),
+            },
+            "cost": {
+                "estimated_usd": round(cost_total, 4),
+                "per_task_avg": round(cost_total / max(total, 1), 5),
+            },
+        }
+
+    conn = get_db()
 
     tasks = conn.execute("""
         SELECT
@@ -225,6 +371,37 @@ def get_overview(user_id: str, days: int = 30) -> dict:
 
 def get_daily_activity(user_id: str, days: int = 14) -> list:
     """Get daily task counts for a sparkline/bar chart."""
+    result = {}
+    for i in range(days):
+        d = (datetime.now() - timedelta(days=days - 1 - i)).strftime("%Y-%m-%d")
+        result[d] = {
+            "date": d,
+            "total": 0, "success": 0, "error": 0,
+            "duration_ms": 0, "cost": 0.0
+        }
+
+    if IS_PRODUCTION:
+        supabase = get_supabase()
+        since_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        rows = supabase.table("daily_stats") \
+            .select("date, tasks_total, tasks_success, tasks_error, total_duration_ms, estimated_cost_usd") \
+            .eq("user_id", user_id) \
+            .gte("date", since_date) \
+            .order("date") \
+            .execute().data or []
+
+        for row in rows:
+            if row["date"] in result:
+                result[row["date"]] = {
+                    "date": row["date"],
+                    "total": row["tasks_total"],
+                    "success": row["tasks_success"],
+                    "error": row["tasks_error"],
+                    "duration_ms": row["total_duration_ms"],
+                    "cost": row["estimated_cost_usd"],
+                }
+        return list(result.values())
+
     conn = get_db()
     rows = conn.execute("""
         SELECT date, tasks_total, tasks_success, tasks_error,
@@ -235,15 +412,6 @@ def get_daily_activity(user_id: str, days: int = 14) -> list:
         ORDER BY date ASC
     """, (user_id, f'-{days} days')).fetchall()
     conn.close()
-
-    result = {}
-    for i in range(days):
-        d = (datetime.now() - timedelta(days=days - 1 - i)).strftime("%Y-%m-%d")
-        result[d] = {
-            "date": d,
-            "total": 0, "success": 0, "error": 0,
-            "duration_ms": 0, "cost": 0.0
-        }
 
     for row in rows:
         result[row["date"]] = {
@@ -260,6 +428,36 @@ def get_daily_activity(user_id: str, days: int = 14) -> list:
 
 def get_top_tools(user_id: str, days: int = 30) -> list:
     """Get most used tools with success rates."""
+    since = time.time() - days * 86400
+
+    if IS_PRODUCTION:
+        supabase = get_supabase()
+        rows = supabase.table("tool_calls") \
+            .select("tool_name, success, duration_ms") \
+            .eq("user_id", user_id) \
+            .gte("created_at", since) \
+            .execute().data or []
+
+        grouped: dict = {}
+        for row in rows:
+            g = grouped.setdefault(row["tool_name"], {"total": 0, "success": 0, "duration_sum": 0})
+            g["total"] += 1
+            g["success"] += 1 if row["success"] else 0
+            g["duration_sum"] += row["duration_ms"] or 0
+
+        result = [
+            {
+                "tool": name,
+                "total": g["total"],
+                "success": g["success"],
+                "success_rate": round(g["success"] / g["total"] * 100, 1),
+                "avg_duration_ms": round(g["duration_sum"] / g["total"]),
+            }
+            for name, g in grouped.items()
+        ]
+        result.sort(key=lambda x: x["total"], reverse=True)
+        return result[:10]
+
     conn = get_db()
     rows = conn.execute("""
         SELECT
@@ -272,7 +470,7 @@ def get_top_tools(user_id: str, days: int = 30) -> list:
         GROUP BY tool_name
         ORDER BY total DESC
         LIMIT 10
-    """, (user_id, time.time() - days * 86400)).fetchall()
+    """, (user_id, since)).fetchall()
     conn.close()
 
     return [
@@ -289,6 +487,30 @@ def get_top_tools(user_id: str, days: int = 30) -> list:
 
 def get_recent_tasks(user_id: str, limit: int = 20) -> list:
     """Get most recent tasks with their details."""
+    if IS_PRODUCTION:
+        supabase = get_supabase()
+        rows = supabase.table("tasks") \
+            .select("id, task, language, status, steps_taken, max_steps, duration_ms, tools_used, created_at") \
+            .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
+            .limit(limit) \
+            .execute().data or []
+
+        return [
+            {
+                "id": row["id"],
+                "task": row["task"],
+                "language": row["language"],
+                "status": row["status"],
+                "steps_taken": row["steps_taken"],
+                "max_steps": row["max_steps"],
+                "duration_seconds": round((row["duration_ms"] or 0) / 1000, 1),
+                "tools_used": row["tools_used"] or [],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
     conn = get_db()
     rows = conn.execute("""
         SELECT id, task, language, status, steps_taken,
@@ -318,6 +540,35 @@ def get_recent_tasks(user_id: str, limit: int = 20) -> list:
 
 def get_language_breakdown(user_id: str, days: int = 30) -> list:
     """Get breakdown of tasks by programming language."""
+    since = time.time() - days * 86400
+
+    if IS_PRODUCTION:
+        supabase = get_supabase()
+        rows = supabase.table("tasks") \
+            .select("language, status") \
+            .eq("user_id", user_id) \
+            .gte("created_at", since) \
+            .execute().data or []
+
+        grouped: dict = {}
+        for row in rows:
+            lang = row["language"] or "general"
+            g = grouped.setdefault(lang, {"total": 0, "success": 0})
+            g["total"] += 1
+            g["success"] += 1 if row["status"] == "success" else 0
+
+        result = [
+            {
+                "language": lang,
+                "total": g["total"],
+                "success": g["success"],
+                "pass_rate": round(g["success"] / g["total"] * 100, 1),
+            }
+            for lang, g in grouped.items()
+        ]
+        result.sort(key=lambda x: x["total"], reverse=True)
+        return result
+
     conn = get_db()
     rows = conn.execute("""
         SELECT
@@ -328,7 +579,7 @@ def get_language_breakdown(user_id: str, days: int = 30) -> list:
         WHERE user_id = ? AND created_at >= ?
         GROUP BY language
         ORDER BY total DESC
-    """, (user_id, time.time() - days * 86400)).fetchall()
+    """, (user_id, since)).fetchall()
     conn.close()
 
     return [

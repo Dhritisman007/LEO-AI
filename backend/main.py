@@ -22,6 +22,7 @@ from analytics import (
     get_overview, get_daily_activity, get_top_tools,
     get_recent_tasks, get_language_breakdown,
 )
+from keepalive import start_keepalive
 
 load_dotenv()
 
@@ -30,9 +31,16 @@ model = genai.GenerativeModel("gemini-flash-lite-latest")
 
 app = FastAPI(title="LEO Agent API")
 
+_default_origins = [
+    "http://localhost:3000", "http://localhost:3001",
+    "http://127.0.0.1:3000", "http://127.0.0.1:3001",
+]
+_frontend_url = os.getenv("FRONTEND_URL")
+allow_origins = _default_origins + [_frontend_url] if _frontend_url else _default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,6 +85,11 @@ class ResumeRequest(BaseModel):
 class MultiAgentRequest(BaseModel):
     task: str
     user_id: str = "anonymous"
+
+@app.on_event("startup")
+def on_startup():
+    start_keepalive()
+
 
 @app.get("/")
 def root():

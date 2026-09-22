@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { X, Play, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { API_URL } from "../lib/api";
 
 type EvalResult = {
   id: string;
@@ -45,7 +46,7 @@ export default function EvalDashboard({ onClose }: { onClose: () => void }) {
     setRunning(true);
     setSummary(null);
     try {
-      const res = await fetch("http://localhost:8000/evals/run", {
+      const res = await fetch(`${API_URL}/evals/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

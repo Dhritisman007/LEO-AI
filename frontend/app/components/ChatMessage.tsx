@@ -11,6 +11,7 @@ import { Message } from "../types";
 import PlanTracker from "./PlanTracker";
 import ExplainPanel from "./ExplainPanel";
 import MessageContent from "./MessageContent";
+import { API_URL } from "../lib/api";
 
 function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -168,7 +169,7 @@ export default function ChatMessage({
     setExplanation("");
     const task = allMessages.find((_, i) => allMessages[i + 1]?.id === message.id)?.content || "";
     try {
-      const res = await fetch("http://localhost:8000/explain", {
+      const res = await fetch(`${API_URL}/explain`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: codeInfo.code, filename: codeInfo.filename, task, user_id: userId }),

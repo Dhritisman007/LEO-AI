@@ -10,6 +10,7 @@ import {
   CheckCircle2, XCircle, Wrench, Code,
   RefreshCw, Activity,
 } from "lucide-react";
+import { API_URL } from "../lib/api";
 
 type Overview = {
   period_days: number;
@@ -118,11 +119,11 @@ export default function AnalyticsDashboard({
     setLoading(true);
     try {
       const [ov, da, to, ta, la] = await Promise.all([
-        fetch(`http://localhost:8000/analytics/overview?user_id=${userId}&days=${period}`).then(r => r.json()),
-        fetch(`http://localhost:8000/analytics/daily?user_id=${userId}&days=${period}`).then(r => r.json()),
-        fetch(`http://localhost:8000/analytics/tools?user_id=${userId}&days=${period}`).then(r => r.json()),
-        fetch(`http://localhost:8000/analytics/tasks?user_id=${userId}&limit=20`).then(r => r.json()),
-        fetch(`http://localhost:8000/analytics/languages?user_id=${userId}&days=${period}`).then(r => r.json()),
+        fetch(`${API_URL}/analytics/overview?user_id=${userId}&days=${period}`).then(r => r.json()),
+        fetch(`${API_URL}/analytics/daily?user_id=${userId}&days=${period}`).then(r => r.json()),
+        fetch(`${API_URL}/analytics/tools?user_id=${userId}&days=${period}`).then(r => r.json()),
+        fetch(`${API_URL}/analytics/tasks?user_id=${userId}&limit=20`).then(r => r.json()),
+        fetch(`${API_URL}/analytics/languages?user_id=${userId}&days=${period}`).then(r => r.json()),
       ]);
       setOverview(ov);
       setDaily(da.data || []);

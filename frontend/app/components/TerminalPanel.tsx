@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Terminal, Play, X } from "lucide-react";
 import { motion } from "framer-motion";
+import { WS_URL } from "../lib/api";
 
 type TerminalLine = {
   type: "stdout" | "stderr" | "error" | "exit" | "system";
@@ -36,7 +37,7 @@ export default function TerminalPanel({ onClose }: { onClose: () => void }) {
     setLines([{ type: "system", content: "$ running..." }]);
     setRunning(true);
 
-    const ws = new WebSocket("ws://localhost:8000/ws/execute");
+    const ws = new WebSocket(`${WS_URL}/ws/execute`);
     wsRef.current = ws;
 
     ws.onopen = () => {

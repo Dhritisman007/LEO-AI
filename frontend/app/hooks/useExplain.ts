@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { API_URL } from "../lib/api";
 
 export function useExplain() {
   const [explaining, setExplaining] = useState<string | null>(null); // message id being explained
@@ -22,7 +23,7 @@ export function useExplain() {
     setExplanation((prev) => ({ ...prev, [messageId]: "" }));
 
     try {
-      const res = await fetch("http://localhost:8000/explain", {
+      const res = await fetch(`${API_URL}/explain`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, filename, task, user_id: userId }),

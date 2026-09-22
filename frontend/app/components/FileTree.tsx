@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { File, Folder, FolderOpen, RefreshCw } from "lucide-react";
+import { API_URL } from "../lib/api";
 
 type TreeNode = {
   name: string;
@@ -81,7 +82,7 @@ export default function FileTree({
   async function fetchTree() {
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/workspace/tree?user_id=${encodeURIComponent(userId)}`);
+      const res = await fetch(`${API_URL}/workspace/tree?user_id=${encodeURIComponent(userId)}`);
       const data = await res.json();
       if (data.success) setTree(data.tree);
     } catch {

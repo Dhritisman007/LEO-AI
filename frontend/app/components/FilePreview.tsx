@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import { motion } from "framer-motion";
+import { API_URL } from "../lib/api";
 
 function getLanguage(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase();
@@ -39,7 +40,7 @@ export default function FilePreview({
     if (!filename) return;
     setLoading(true);
     setContent("");
-    fetch(`http://localhost:8000/workspace/file/${filename}`)
+    fetch(`${API_URL}/workspace/file/${filename}`)
       .then((res) => res.json())
       .then((data) => setContent(data.content || ""))
       .catch(() => setContent("// Could not load file"))

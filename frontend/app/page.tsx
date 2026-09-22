@@ -28,6 +28,7 @@ import { useReactions } from "./hooks/useReactions";
 import ShortcutSheet from "./components/ShortcutSheet";
 import AnalyticsDashboard from "./components/AnalyticsDashboard";
 import { Message, Conversation } from "./types";
+import { API_URL } from "./lib/api";
 
 export default function Home() {
   const { data: session } = useSession();
@@ -189,7 +190,7 @@ export default function Home() {
         formData.append("max_steps", "10");
         formData.append("file", attachments[0].raw); // first file
 
-        const res = await fetch("http://localhost:8000/agent/with-file", {
+        const res = await fetch(`${API_URL}/agent/with-file`, {
           method: "POST",
           body: formData,
         });
@@ -212,7 +213,7 @@ export default function Home() {
         setStatus({ type: "idle", message: "" });
       } else {
         if (isMultiAgent) {
-          const res = await fetch("http://localhost:8000/agent/multi", {
+          const res = await fetch(`${API_URL}/agent/multi`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ task: userMsg.content, user_id: userId }),
@@ -232,7 +233,7 @@ export default function Home() {
           return;
         }
 
-        const url = `http://localhost:8000/agent/stream?task=${encodeURIComponent(userMsg.content)}&user_id=${encodeURIComponent(userId)}&max_steps=10`;
+        const url = `${API_URL}/agent/stream?task=${encodeURIComponent(userMsg.content)}&user_id=${encodeURIComponent(userId)}&max_steps=10`;
         const eventSource = new EventSource(url);
 
         eventSource.onmessage = (event) => {
