@@ -10,7 +10,7 @@ type Props = {
   onChange: (v: string) => void;
   onSend: () => void;
   disabled: boolean;
-  inputRef?: React.RefObject<HTMLTextAreaElement>;
+  inputRef?: React.RefObject<HTMLTextAreaElement | null>;
   attachments: AttachedFile[];
   onAttach: (files: FileList | File[]) => void;
   onRemoveAttachment: (id: string) => void;

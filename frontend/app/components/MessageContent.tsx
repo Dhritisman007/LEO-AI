@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import { Check, Copy } from "lucide-react";
 import SyntaxHighlighter from "react-syntax-highlighter";
 import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs";
@@ -60,7 +60,7 @@ function parseLine(line: string, key: number) {
   // Handle inline code: `code`
   const codeRegex = /`([^`]+)`/g;
 
-  let result: (string | JSX.Element)[] = [];
+  let result: (string | ReactElement)[] = [];
   let lastIndex = 0;
   let match;
 
@@ -95,7 +95,7 @@ function parseLine(line: string, key: number) {
 export default function MessageContent({ content }: { content: string }) {
   if (!content) return null;
 
-  const parts: JSX.Element[] = [];
+  const parts: ReactElement[] = [];
   const lines = content.split("\n");
   let i = 0;
   let partKey = 0;

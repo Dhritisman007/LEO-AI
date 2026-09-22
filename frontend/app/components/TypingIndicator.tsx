@@ -1,4 +1,5 @@
 "use client";
+import type { ReactElement } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Wrench, Brain, Search, FileText,
@@ -10,7 +11,7 @@ type Props = {
   message?: string;
 };
 
-const TOOL_CONFIG: Record<string, { icon: JSX.Element; label: string; color: string }> = {
+const TOOL_CONFIG: Record<string, { icon: ReactElement; label: string; color: string }> = {
   write_file:   { icon: <FileText size={13} />,  label: "Writing file",    color: "#a78bfa" },
   read_file:    { icon: <FileText size={13} />,  label: "Reading file",    color: "#a78bfa" },
   run_code:     { icon: <Play size={13} />,      label: "Running code",    color: "#4ade80" },

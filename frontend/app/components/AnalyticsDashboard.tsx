@@ -347,7 +347,7 @@ export default function AnalyticsDashboard({
                         <LineChart data={daily}>
                           <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: "#444", fontSize: 10 }} axisLine={false} tickLine={false} interval={Math.floor(daily.length / 5)} />
                           <YAxis tick={{ fill: "#444", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v.toFixed(4)}`} width={60} />
-                          <Tooltip formatter={(v: number) => [`$${v.toFixed(5)}`, "Cost"]} contentStyle={{ background: "#161616", border: "1px solid #2a2a2a", borderRadius: "8px", fontSize: "12px" }} />
+                          <Tooltip formatter={(v) => [`$${Number(v).toFixed(5)}`, "Cost"]} contentStyle={{ background: "#161616", border: "1px solid #2a2a2a", borderRadius: "8px", fontSize: "12px" }} />
                           <Line type="monotone" dataKey="cost" stroke="#22c55e" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#22c55e" }} />
                         </LineChart>
                       </ResponsiveContainer>

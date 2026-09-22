@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactElement } from "react";
 import { motion } from "framer-motion";
 import { Copy, RefreshCw, Trash2, BookOpen, Share } from "lucide-react";
 
 type MenuItem = {
-  icon: JSX.Element;
+  icon: ReactElement;
   label: string;
   action: () => void;
   danger?: boolean;

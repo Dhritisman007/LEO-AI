@@ -50,11 +50,13 @@ export default function ConversationViewer({ conversation, userId, onClose, onRe
             </span>
           </div>
           {conversation.messages.map((m) => (
-            <ChatMessage 
-              key={m.id} 
-              message={m} 
-              allMessages={conversation.messages} 
-              userId={userId} 
+            <ChatMessage
+              key={m.id}
+              message={m}
+              allMessages={conversation.messages}
+              userId={userId}
+              onToggleReaction={() => {}}
+              getReactions={() => []}
             />
           ))}
         </div>
