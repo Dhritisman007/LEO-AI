@@ -174,3 +174,34 @@ def get_file_url(filename: str, user_id: str = "anonymous", expires_in: int = 36
         return {"success": True, "url": result.get("signedURL") or result.get("signedUrl")}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def sync_workspace_to_local(user_id: str, local_dir: str) -> None:
+    """Download all of a user's persisted files into a local directory.
+
+    Code execution always runs on local disk (a Python/Node/etc. process
+    needs real files, not a storage API), but in production write_file
+    persists to Supabase, not local disk — so without this, code that
+    imports or reads a file LEO just wrote can't find it. No-op in
+    development, where write_file already writes straight to local_dir.
+    """
+    if not IS_PRODUCTION:
+        return
+    try:
+        result = list_user_files(user_id)
+        if not result.get("success"):
+            return
+        for entry in result["files"]:
+            filename = entry["filename"]
+            dl = download_file(filename, user_id)
+            if not dl.get("success"):
+                continue
+            content = dl["content"]
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            dest = os.path.join(local_dir, filename)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(content)
+    except Exception as e:
+        print(f"Workspace sync-to-local failed: {e}")

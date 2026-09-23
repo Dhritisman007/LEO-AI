@@ -134,10 +134,16 @@ def _run_local(code: str, language: str, config: dict, filename: str, user_id: s
     filename to avoid overwriting existing workspace files.
     """
     from .file_tools import get_workspace_dir
-    
+    from storage import sync_workspace_to_local
+
     ext = config["extension"]
     workspace = get_workspace_dir(user_id)
-    
+
+    # In production, write_file persists to Supabase, not this local
+    # scratch dir — pull the user's files down first so code that imports
+    # or reads something LEO just wrote can actually find it. No-op in dev.
+    sync_workspace_to_local(user_id, workspace)
+
     # Use a unique temp filename so we don't overwrite workspace files
     import uuid
     run_filename = f"_leo_run_{uuid.uuid4().hex[:8]}{ext}"
