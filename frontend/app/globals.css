@@ -2664,3 +2664,80 @@ body {
   0%, 100% { opacity: 0.55; transform: scale(0.92); }
   50% { opacity: 1; transform: scale(1.05); }
 }
+
+/* Offline banner — stays out of the way, doesn't hide the app */
+.leo-offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: linear-gradient(90deg, rgba(239,68,68,0.92), rgba(234,179,8,0.92));
+  color: #1a1206;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  text-align: center;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+}
+
+.leo-offline-banner__icon {
+  animation: leo-offline-blink 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes leo-offline-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Error boundary fallback */
+.leo-crash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  background: var(--bg-base);
+  text-align: center;
+  padding: var(--space-6);
+}
+
+.leo-crash-screen__icon {
+  color: var(--accent-red);
+}
+
+.leo-crash-screen__title {
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+}
+
+.leo-crash-screen__note {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 320px;
+}
+
+.leo-crash-screen__button {
+  margin-top: var(--space-2);
+  padding: 10px 20px;
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  border: none;
+  border-radius: var(--radius-full, 9999px);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+}
+
+.leo-crash-screen__button:hover {
+  background: #d4d4d4;
+}
