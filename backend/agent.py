@@ -40,6 +40,26 @@ def classify_failure(tool_name: str, error: str) -> str:
     # Default — let LEO see it and decide (most code errors fall here)
     return "general"
 
+
+def format_tool_error(tool_result: dict) -> str:
+    """Extract a human-readable error message from a tool result dict.
+
+    run_code failures never set an "error" key — only stdout/stderr/
+    exit_code — so tool_result.get("error") alone renders as the literal
+    string "None" in failure messages shown to the user. Falls back to
+    stderr, then exit code, so failures are actually diagnosable.
+    """
+    error = tool_result.get("error")
+    if error:
+        return str(error)
+    stderr = tool_result.get("stderr")
+    if stderr:
+        return stderr.strip()[-500:]
+    exit_code = tool_result.get("exit_code")
+    if exit_code is not None:
+        return f"exited with code {exit_code}, no output"
+    return "unknown error"
+
 # Ensure API key is configured even when imported standalone
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
@@ -584,13 +604,13 @@ def run_agent(
             if not tool_result.get("success"):
                 failure_type = classify_failure(tool_name, tool_result.get("error", ""))
                 step_failure_counts[current_plan_idx] = step_failure_counts.get(current_plan_idx, 0) + 1
-                scratchpad_write(f"Tool '{tool_name}' failed ({failure_type}) with params {params}: {tool_result.get('error')}", user_id=user_id)
+                scratchpad_write(f"Tool '{tool_name}' failed ({failure_type}) with params {params}: {format_tool_error(tool_result)}", user_id=user_id)
 
                 log(f"FAILURE CLASSIFIED AS: {failure_type} (attempt #{step_failure_counts[current_plan_idx]} on this plan step)")
 
                 # Missing capability — stop wasting steps immediately
                 if failure_type == "missing_capability":
-                    final_answer = f"ERROR: LEO doesn't have a tool capable of this — {tool_result.get('error')}"
+                    final_answer = f"ERROR: LEO doesn't have a tool capable of this — {format_tool_error(tool_result)}"
                     steps[-1]["result"] = tool_result
                     if plan and current_plan_idx < len(plan):
                         plan[current_plan_idx]["status"] = "failed"
@@ -602,7 +622,7 @@ def run_agent(
                     final_answer = (
                         f"ERROR: LEO tried {step_failure_counts[current_plan_idx]} times on "
                         f"'{plan[current_plan_idx]['description'] if plan else 'this step'}' and couldn't succeed. "
-                        f"Last error: {tool_result.get('error')}"
+                        f"Last error: {format_tool_error(tool_result)}"
                     )
                     steps[-1]["result"] = tool_result
                     if plan and current_plan_idx < len(plan):

@@ -12,7 +12,7 @@ from memory import (
 )
 from agent import (
     SYSTEM_PROMPT, generate_plan, parse_tool_call,
-    format_tool_descriptions, classify_failure, log
+    format_tool_descriptions, classify_failure, format_tool_error, log
 )
 from context_engine import format_context_for_prompt
 from checkpoints import save_checkpoint
@@ -270,10 +270,10 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
             if not tool_result.get("success"):
                 failure_type = classify_failure(tool_name, tool_result.get("error", ""))
                 step_failure_counts[current_plan_idx] = step_failure_counts.get(current_plan_idx, 0) + 1
-                scratchpad_write(f"Tool '{tool_name}' failed: {tool_result.get('error')}", user_id)
+                scratchpad_write(f"Tool '{tool_name}' failed: {format_tool_error(tool_result)}", user_id)
 
                 if failure_type == "missing_capability" or step_failure_counts[current_plan_idx] >= 3:
-                    final_answer = f"ERROR: Could not complete — {tool_result.get('error')}"
+                    final_answer = f"ERROR: Could not complete — {format_tool_error(tool_result)}"
                     steps[-1]["result"] = tool_result
                     if plan and current_plan_idx < len(plan):
                         plan[current_plan_idx]["status"] = "failed"
