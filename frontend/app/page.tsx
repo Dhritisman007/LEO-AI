@@ -297,17 +297,35 @@ export default function Home() {
                 ),
               }));
               break;
-            case "thought":
+            case "thought": {
               setCurrentTool(undefined);
               setCurrentToolMsg("Thinking...");
               setStatus({ type: "thinking", message: "LEO is reasoning..." });
-              updateMsg(id, leoMsgId, (m) => ({
-                ...m,
-                steps: [...(m.steps || []), {
-                  step: data.step, type: "thought" as const, content: data.content
-                }],
-              }));
+
+              // The model sometimes buries "DONE:" mid-response instead of
+              // leading with it, so it never matches the backend's
+              // startswith("DONE:") check and gets logged as a thought
+              // instead of the final answer. Long, markdown-formatted
+              // "thoughts" are almost always actually the final answer —
+              // promote them into the reply bubble instead of the
+              // collapsed thinking panel.
+              const hasMarkdown = /\*\*[^*]+\*\*|^#{1,6}\s|```|^[-•]\s/m.test(data.content || "");
+              const looksLikeFinalAnswer = (data.content?.length || 0) > 200 && hasMarkdown;
+
+              if (looksLikeFinalAnswer) {
+                const doneMatch = data.content.match(/DONE:\s*([\s\S]*)/);
+                const answer = (doneMatch ? doneMatch[1] : data.content).trim();
+                updateMsg(id, leoMsgId, (m) => ({ ...m, content: answer }));
+              } else {
+                updateMsg(id, leoMsgId, (m) => ({
+                  ...m,
+                  steps: [...(m.steps || []), {
+                    step: data.step, type: "thought" as const, content: data.content
+                  }],
+                }));
+              }
               break;
+            }
             case "done":
               const durationMs = Date.now() - taskStartTime.current;
               const durationSec = Math.round(durationMs / 1000);

@@ -54,6 +54,18 @@ function InlineCode({ code }: { code: string }) {
   return <code className="inline-code">{code}</code>;
 }
 
+function Heading({ level, keyNum, children }: { level: number; keyNum: number; children: (string | ReactElement)[] }) {
+  const className = `msg-heading msg-heading--${level}`;
+  switch (level) {
+    case 1: return <h1 key={keyNum} className={className}>{children}</h1>;
+    case 2: return <h2 key={keyNum} className={className}>{children}</h2>;
+    case 3: return <h3 key={keyNum} className={className}>{children}</h3>;
+    case 4: return <h4 key={keyNum} className={className}>{children}</h4>;
+    case 5: return <h5 key={keyNum} className={className}>{children}</h5>;
+    default: return <h6 key={keyNum} className={className}>{children}</h6>;
+  }
+}
+
 function parseLine(line: string, key: number) {
   // Handle bold: **text**
   const boldRegex = /\*\*(.*?)\*\*/g;
@@ -122,6 +134,20 @@ export default function MessageContent({ content }: { content: string }) {
           language={language}
         />
       );
+      continue;
+    }
+
+    // Headers: # through ######
+    const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
+    if (headerMatch) {
+      const level = headerMatch[1].length;
+      parts.push(
+        <Heading key={partKey} level={level} keyNum={partKey}>
+          {parseLine(headerMatch[2], partKey)}
+        </Heading>
+      );
+      partKey++;
+      i++;
       continue;
     }
 
