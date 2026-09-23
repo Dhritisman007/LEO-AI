@@ -279,13 +279,14 @@ def check_completion(text: str):
     """Check if LEO's response indicates completion or error.
     Returns (type, content) or (None, None) if not a completion.
     """
-    # Check for DONE: anywhere in the response
-    done_match = re.search(r"DONE:\s*(.*)", text, re.DOTALL)
+    # Check for DONE: at the start of a line (not embedded inside a tool
+    # call's PARAMS JSON, which can't contain raw newlines in string values)
+    done_match = re.search(r"^DONE:\s*(.*)", text, re.DOTALL | re.MULTILINE)
     if done_match:
         return "done", done_match.group(1).strip()
 
-    # Check for ERROR: anywhere in the response
-    error_match = re.search(r"ERROR:\s*(.*)", text, re.DOTALL)
+    # Check for ERROR: at the start of a line
+    error_match = re.search(r"^ERROR:\s*(.*)", text, re.DOTALL | re.MULTILINE)
     if error_match:
         return "error", error_match.group(1).strip()
 
@@ -468,8 +469,9 @@ def run_agent(
         log(f"\n--- Step {step + 1} ---\nLEO: {leo_response}")
         history.append(f"LEO: {leo_response}")
 
-        if leo_response.startswith("DONE:"):
-            final_answer = leo_response.replace("DONE:", "").strip()
+        done_match = re.search(r"^DONE:\s*(.*)", leo_response, re.DOTALL | re.MULTILINE)
+        if done_match:
+            final_answer = done_match.group(1).strip()
             steps.append({"step": step + 1, "type": "done", "content": leo_response})
             # mark all remaining plan steps done
             for p in plan:
@@ -477,8 +479,9 @@ def run_agent(
                     p["status"] = "done"
             break
 
-        if leo_response.startswith("ERROR:"):
-            final_answer = leo_response
+        error_match = re.search(r"^ERROR:\s*(.*)", leo_response, re.DOTALL | re.MULTILINE)
+        if error_match:
+            final_answer = f"ERROR: {error_match.group(1).strip()}"
             steps.append({"step": step + 1, "type": "error", "content": leo_response})
             if plan and current_plan_idx < len(plan):
                 plan[current_plan_idx]["status"] = "failed"

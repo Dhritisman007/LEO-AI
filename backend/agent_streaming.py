@@ -1,5 +1,6 @@
 import json
 import asyncio
+import re
 import time
 import uuid
 # pyrefly: ignore [missing-import]
@@ -102,8 +103,9 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
 
         history.append(f"LEO: {leo_response}")
 
-        if leo_response.startswith("DONE:"):
-            final_answer = leo_response.replace("DONE:", "").strip()
+        done_match = re.search(r"^DONE:\s*(.*)", leo_response, re.DOTALL | re.MULTILINE)
+        if done_match:
+            final_answer = done_match.group(1).strip()
             for p in plan:
                 if p["status"] != "failed":
                     p["status"] = "done"
@@ -152,11 +154,12 @@ async def run_agent_streaming(task: str, max_steps: int = 10, user_id: str = "an
                 yield chunk
             break
 
-        if leo_response.startswith("ERROR:"):
-            final_answer = leo_response
+        error_match = re.search(r"^ERROR:\s*(.*)", leo_response, re.DOTALL | re.MULTILINE)
+        if error_match:
+            final_answer = f"ERROR: {error_match.group(1).strip()}"
             if plan and current_plan_idx < len(plan):
                 plan[current_plan_idx]["status"] = "failed"
-            async for chunk in emit("agent_error", {"content": leo_response, "plan": plan}):
+            async for chunk in emit("agent_error", {"content": final_answer, "plan": plan}):
                 yield chunk
             break
 
