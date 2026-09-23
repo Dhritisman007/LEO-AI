@@ -513,6 +513,7 @@ export default function Home() {
                   >
                     <FilePreview
                       filename={selectedFile}
+                      userId={userId}
                       onClose={() => setSelectedFile(null)}
                     />
                   </motion.div>

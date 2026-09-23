@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { X, Download, Loader2 } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import { motion } from "framer-motion";
-import { API_URL } from "../lib/api";
+import { API_URL, downloadWorkspaceFile } from "../lib/api";
 
 function getLanguage(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase();
@@ -28,13 +28,28 @@ function getLanguage(filename: string): string {
 
 export default function FilePreview({
   filename,
+  userId,
   onClose,
 }: {
   filename: string | null;
+  userId: string;
   onClose: () => void;
 }) {
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  async function handleDownload() {
+    if (!filename) return;
+    setDownloading(true);
+    try {
+      await downloadWorkspaceFile(filename, userId);
+    } catch (e) {
+      console.error("Download failed:", e);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   useEffect(() => {
     if (!filename) return;
@@ -64,9 +79,19 @@ export default function FilePreview({
           </span>
           <span className="text-sm font-mono text-zinc-300">{filename}</span>
         </div>
-        <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
-          <X size={16} />
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            title="Download file"
+            className="text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+          >
+            {downloading ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
+          </button>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {loading ? (

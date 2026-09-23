@@ -1,8 +1,10 @@
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 # pyrefly: ignore [missing-import]
 import google.generativeai as genai
+import jwt as pyjwt
 import os
 from dotenv import load_dotenv
 from tools import TOOLS, TOOL_DESCRIPTIONS
@@ -10,6 +12,7 @@ from agent import run_agent
 from context_engine import build_context, format_context_for_prompt
 from tools.file_tools import get_file_tree, get_file_content
 from tools.shell_tools import run_python_streaming
+from storage import get_file_url, download_file, IS_PRODUCTION
 from memory import memory_stats
 from evals.runner import run_single_eval, run_all_evals
 from evals.test_cases import TEST_CASES
@@ -25,6 +28,8 @@ from analytics import (
 from keepalive import start_keepalive
 
 load_dotenv()
+
+NEXTAUTH_SECRET = os.getenv("NEXTAUTH_SECRET")
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel("gemini-flash-lite-latest")
@@ -300,6 +305,49 @@ def workspace_file(filename: str, user_id: str = "anonymous"):
 @app.get("/workspace/context")
 def workspace_context(user_id: str = "anonymous"):
     return build_context(user_id)
+
+
+def verify_backend_token(user_id: str, token: str):
+    """Verify a short-lived JWT minted by the frontend's /api/backend-token
+    route (signed with NEXTAUTH_SECRET after checking the real NextAuth
+    session) and confirm it belongs to the requested user_id."""
+    if not NEXTAUTH_SECRET:
+        raise HTTPException(status_code=500, detail="Server auth not configured")
+    try:
+        payload = pyjwt.decode(token, NEXTAUTH_SECRET, algorithms=["HS256"])
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=403, detail="Download link expired")
+    except pyjwt.InvalidTokenError:
+        raise HTTPException(status_code=403, detail="Invalid download token")
+
+    if payload.get("sub") != user_id:
+        raise HTTPException(status_code=403, detail="You can only download your own files")
+
+
+@app.get("/workspace/download/{filename:path}")
+def workspace_download(filename: str, token: str, user_id: str = "anonymous"):
+    verify_backend_token(user_id, token)
+
+    if IS_PRODUCTION:
+        result = get_file_url(filename, user_id)
+        if not result.get("success"):
+            raise HTTPException(status_code=404, detail=result.get("error", "File not found"))
+        return RedirectResponse(result["url"])
+
+    result = download_file(filename, user_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("error", "File not found"))
+
+    content = result["content"]
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+
+    safe_filename = filename.rsplit("/", 1)[-1]
+    return Response(
+        content=content,
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+    )
 
 @app.get("/memory/stats")
 def get_memory_stats(user_id: str = "anonymous"):

@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Wrench, CheckCircle2, XCircle, Brain,
-  Loader2, BookOpen, Copy, Check, ChevronDown, ChevronUp, Zap, RefreshCw, Trash2
+  Loader2, BookOpen, Copy, Check, ChevronDown, ChevronUp, Zap, RefreshCw, Trash2, Download
 } from "lucide-react";
 import ContextMenu from "./ContextMenu";
 import ReactionPicker from "./ReactionPicker";
@@ -11,7 +11,7 @@ import { Message } from "../types";
 import PlanTracker from "./PlanTracker";
 import ExplainPanel from "./ExplainPanel";
 import MessageContent from "./MessageContent";
-import { API_URL } from "../lib/api";
+import { API_URL, downloadWorkspaceFile } from "../lib/api";
 
 function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -23,6 +23,14 @@ function timeAgo(ts: number) {
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   return `${Math.floor(mins / 60)}h ago`;
+}
+
+function extractLatestWrittenFile(message: Message): string | null {
+  const writeSteps = message.steps?.filter(
+    (s) => s.type === "tool_call" && s.tool === "write_file" && s.params?.filename
+  );
+  if (!writeSteps || writeSteps.length === 0) return null;
+  return writeSteps[writeSteps.length - 1].params.filename;
 }
 
 function extractCode(message: Message) {
@@ -111,6 +119,7 @@ export default function ChatMessage({
   const [copied, setCopied] = useState(false);
   const [stepsExpanded, setStepsExpanded] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   function handleContextMenu(e: React.MouseEvent) {
     e.preventDefault();
@@ -159,8 +168,21 @@ export default function ChatMessage({
 
   const codeInfo = message.role === "leo" ? extractCode(message) : null;
   const hasCode = !!codeInfo;
+  const latestWrittenFile = message.role === "leo" ? extractLatestWrittenFile(message) : null;
   const stepCount = message.steps?.length || 0;
   const visibleSteps = stepsExpanded ? message.steps : message.steps?.slice(-3);
+
+  async function handleDownload() {
+    if (!latestWrittenFile) return;
+    setDownloading(true);
+    try {
+      await downloadWorkspaceFile(latestWrittenFile, userId);
+    } catch (e) {
+      console.error("Download failed:", e);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   async function handleExplain() {
     if (!codeInfo) return;
@@ -383,19 +405,29 @@ export default function ChatMessage({
       )}
 
       {/* Actions */}
-      {message.status === "done" && hasCode && (
+      {message.status === "done" && (hasCode || latestWrittenFile) && (
         <div className="msg-actions">
-          <button
-            onClick={handleExplain}
-            disabled={explaining}
-            className="msg-action-btn"
-          >
-            {explaining ? <Loader2 size={12} className="spin" /> : <BookOpen size={12} />}
-            {showExplain ? "Re-explain" : "Explain code"}
-          </button>
-          <button onClick={handleCopy} className="msg-action-btn">
-            {copied ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy</>}
-          </button>
+          {hasCode && (
+            <>
+              <button
+                onClick={handleExplain}
+                disabled={explaining}
+                className="msg-action-btn"
+              >
+                {explaining ? <Loader2 size={12} className="spin" /> : <BookOpen size={12} />}
+                {showExplain ? "Re-explain" : "Explain code"}
+              </button>
+              <button onClick={handleCopy} className="msg-action-btn">
+                {copied ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy</>}
+              </button>
+            </>
+          )}
+          {latestWrittenFile && (
+            <button onClick={handleDownload} disabled={downloading} className="msg-action-btn">
+              {downloading ? <Loader2 size={12} className="spin" /> : <Download size={12} />}
+              Download files
+            </button>
+          )}
         </div>
       )}
 
