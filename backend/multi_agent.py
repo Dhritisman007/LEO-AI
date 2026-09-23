@@ -91,7 +91,15 @@ async def run_sub_agent(
 
         if tool_name and tool_name in TOOLS:
             try:
-                if tool_name in ["read_file", "write_file", "list_files", "get_file_tree", "get_file_content"]:
+                USER_SCOPED_TOOLS = [
+                    "read_file",
+                    "write_file",
+                    "list_files",
+                    "get_file_tree",
+                    "get_file_content",
+                    "run_code",
+                ]
+                if tool_name in USER_SCOPED_TOOLS:
                     params["user_id"] = user_id
                 tool_result = TOOLS[tool_name](**params)
             except Exception as e:
